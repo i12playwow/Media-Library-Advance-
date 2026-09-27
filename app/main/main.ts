@@ -9,6 +9,7 @@ import { moveMovieToMode } from "../services/fileService";
 import { buildTargetSubtitlePath } from "../services/libraryLayout";
 import { DEFAULT_SCAN_OPTIONS, scanLibraries, createCancelToken, registerLocalFiles, type CancelToken } from "../services/libraryScanner";
 import { extractSubtitleLanguage } from "../services/libraryScanner";
+import { readGuardsChainState } from "../services/guardsChain";
 import { SUBTITLE_EXTENSIONS } from "../shared/contracts";
 import { enrichMoviePoster } from "../services/metadataService";
 import { runFfmpeg } from "../services/ffmpegService";
@@ -848,6 +849,12 @@ function registerHandlers(): void {
   });
 
   ipcMain.handle("app:getState", async () => buildShellState());
+
+  // ── Guards chain state (Settings → System) ─────────────────────────────────
+  // The renderer never reads the log from disk itself; main verifies the
+  // tamper-evident chain at read time through the same replay the doc-drift
+  // lint performs, so the GUI shows the state npm test would compute.
+  ipcMain.handle("guards:getChainState", async () => readGuardsChainState());
 
   ipcMain.handle("settings:saveMetadata", async (_event, settings: MetadataSettings) => {
     database.setMetadataSettings(settings);

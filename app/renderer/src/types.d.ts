@@ -1,6 +1,7 @@
 import type {
   AppShellState,
   ConvertVideoResult,
+  GuardsChainState,
   MetadataSettings,
   LibraryMode,
   MovieRecord,
@@ -31,6 +32,7 @@ declare global {
       getThemeMode: () => Promise<"dark" | "light">;
       setThemeMode: (themeMode: "dark" | "light") => Promise<AppShellState>;
       getAppState: () => Promise<AppShellState>;
+      getGuardsChainState: () => Promise<GuardsChainState>;
       saveMetadataSettings: (settings: MetadataSettings) => Promise<AppShellState>;
       saveOrganizationSettings: (settings: OrganizationSettings) => Promise<AppShellState>;
       pickLibraryFolder: () => Promise<string | null>;

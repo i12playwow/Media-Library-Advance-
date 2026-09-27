@@ -113,8 +113,8 @@ class and the pattern for adding one. The guiding rule the stack enforces: **if 
 must fail when the code stops honoring it.**
 
 > Scope note: after a checkout lost the original lint file, the recreated
-> `docsSearchRefs.test.ts` is layer 1 entire — **drift classes 2, 3, 4, 6,
-> 8, 9, and 10** live there, each named in the test list and catalogued in the
+> `docsSearchRefs.test.ts` is layer 1 entire — **drift classes 2, 3, 4, 5, 6,
+> 7, 8, 9, and 10** live there, each named in the test list and catalogued in the
 > file's header. Extend the lint — don't retire it.
 
 ## State of the guards

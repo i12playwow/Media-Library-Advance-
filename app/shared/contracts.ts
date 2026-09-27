@@ -275,3 +275,12 @@ export const VIDEO_EXTENSIONS = [
 ];
 
 export const SUBTITLE_EXTENSIONS = [".srt", ".vtt", ".ass", ".ssa"];
+
+export interface GuardsChainState {
+  ok: boolean;
+  segments: number;
+  entries: number;
+  tipDigest: string | null;
+  lastRun: string | null;
+  verifiedAt: string;
+}

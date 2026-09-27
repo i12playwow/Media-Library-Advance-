@@ -21,6 +21,20 @@ import path from "node:path";
 //     the label-gated PR caller (pr-e2e.yml) must invoke this same job
 //     against the PR's merge ref, label-gated and least-privileged.
 //
+//   drift class 5 — drill.yml (recreated after a checkout loss) must
+//     self-describe what CONTRIBUTING's guards table promises: workflow
+//     name, weekly cron offset from ci.yml's nightly cadence, the exact
+//     three-OS matrix with fail-fast off, per-OS summary artifacts
+//     retained 30 days, read-only drill jobs with write confined to the
+//     append job, and no push trigger;
+//
+//   drift class 7 — the drill workflow's script appetite is wired and
+//     complete, both directions: every `npm run` target is a real wired
+//     package.json script, the appender script exists (builtin-only, hence
+//     the append job installs nothing) and is invoked exactly twice
+//     (append + bounded race retry), npm ci runs once in the drill job,//     and verdict capture pipes through tee with PIPESTATUS-faithful
+//     exit codes;
+//
 //   drift class 4 — search.md's movies write-path and read-path tables must
 //     match database.ts in both directions: every write or read site
 //     documented with its SQL, every write or read site in the code covered
@@ -311,6 +325,17 @@ const triggers = parseWorkflowTopLevel(ciSource).on as {
   schedule?: unknown;
   workflow_dispatch?: unknown;
 };
+
+// ── drift class 5 + 7 data: the drill workflow's self-description ──────────
+const drillWorkflowSource = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "drill.yml"), "utf8");
+const drillWorkflowJobs = parseCiWorkflow(drillWorkflowSource);
+const drillWorkflowTriggers = parseWorkflowTopLevel(drillWorkflowSource).on as {
+  push?: unknown;
+  schedule?: unknown;
+  workflow_dispatch?: unknown;
+};
+const ciCron =
+  (Array.isArray(triggers.schedule) ? (triggers.schedule as Array<{ cron?: string }>)[0]?.cron : "") ?? "";
 
 const testingMd = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf8");
 const ciSection = testingMd.slice(testingMd.indexOf("## CI"));
@@ -703,7 +728,7 @@ const boldTokens = [...ciSection.matchAll(/\*\*([^*]+)\*\*/g)].map((m) =>
 const citedCommands = [...ciSection.matchAll(/`((?:npm|npx|xvfb-run)[^`]*)`/g)].map((m) => m[1]);
 const allRuns = Object.values(jobs).flatMap((job) => job.steps.map((s) => s.run ?? ""));
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", () => {
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -939,6 +964,77 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
       "all actions in one grouped PR"
     ).toEqual(["*"]);
     expect(updates[0]["open-pull-requests-limit"], "bounded PR backlog").toBe(5);
+  });
+
+  // ── drift class 5 — drill.yml's self-description ↔ CONTRIBUTING's row ─────
+  it("drift class 5: drill.yml self-describes the promised shape (cron, matrix, artifacts, privileges)", () => {
+    expect(drillWorkflowJobs, "the drill workflow parses into the documented jobs").toBeDefined();
+    expect(Object.keys(drillWorkflowJobs).sort()).toEqual(["append-log", "drill"]);
+
+    // Weekly, offset from ci.yml's nightly cadence — and not on every push.
+    const schedules = Array.isArray(drillWorkflowTriggers.schedule) ? (drillWorkflowTriggers.schedule as Array<{ cron?: string }>) : [];
+    expect(schedules, "exactly one weekly schedule").toHaveLength(1);
+    const cron = (schedules[0]?.cron ?? "").replace(/"/g, "");
+    expect(cron, "cron shape (weekly Monday slot)").toMatch(/^\d{1,2} \d{1,2} \* \* 1$/);
+    expect(cron, "offset from ci.yml's nightly cadence").not.toBe(ciCron.replace(/"/g, ""));
+    expect(drillWorkflowTriggers.workflow_dispatch, "manual dispatch exists").toBeDefined();
+    expect(drillWorkflowTriggers.push, "the drill does not run on every push").toBeUndefined();
+
+    // The exact OS matrix, fail-open across OSes.
+    const matrix = /\n\s+os: \[([^\]]+)\]/.exec(drillWorkflowSource)?.[1]
+      ?.split(",")
+      .map((s) => s.trim()) ?? [];
+    expect(matrix).toEqual(["windows-latest", "ubuntu-latest", "macos-latest"]);
+    expect(drillWorkflowSource, "one flaky OS must not cancel the others").toContain("fail-fast: false");
+
+    // Per-OS summary artifacts, retained 30 days (the docs' promise).
+    expect(drillWorkflowSource, "upload names the per-OS summary").toContain("name: drill-summary-${{ matrix.os }}");
+    expect(drillWorkflowSource, "upload path is the summary file").toContain("path: drill-summary-${{ matrix.os }}.txt");
+    expect(drillWorkflowSource, "30-day artifact retention").toContain("retention-days: 30");
+    expect(drillWorkflowSource, "the append job downloads every OS summary").toContain("pattern: drill-summary-*");
+    expect(drillWorkflowSource, "summaries merge into one folder").toContain("merge-multiple: true");
+
+    // Least privilege: drill jobs read-only, write confined to the append job.
+    expect(drillWorkflowSource, "top-level permissions are read-only").toMatch(/^permissions:\n  contents: read$/m);
+    expect(drillWorkflowSource.match(/^\s+contents: write$/gm) ?? [], "exactly one write grant (the append job)").toHaveLength(1);
+    expect(drillWorkflowSource, "append job is concurrency-grouped").toContain("group: drill-${{ github.event_name }}");
+  });
+
+  // ── drift class 7 — the drill workflow's script appetite ──────────────────
+  it("drift class 7: drill.yml's script appetite is wired and complete, both directions", () => {
+    // doc → code: every `npm run` the workflow invokes is a real, wired
+    // package.json script whose body matches its claim.
+    const runTargets = [...drillWorkflowSource.matchAll(/npm run ([a-z:.-]+)/g)].map((m) => m[1]);
+    expect([...new Set(runTargets)], "the workflow's npm-run appetite is exactly this set").toEqual(["drill:abi"]);
+    expect(scripts["drill:abi"], "drill:abi drives the contract drill").toBe("node scripts/drill-abi-contract.cjs");
+    expect(fs.existsSync(path.join(repoRoot, "scripts", "drill-abi-contract.cjs")), "the drill script exists").toBe(true);
+
+    // The appender: exists, referenced exactly twice — the append and the
+    // bounded race-retry re-append (no force-push; the loop is the remedy).
+    const appenderRefs = drillWorkflowSource.match(/node scripts\/append-drill-log\.cjs/g) ?? [];
+    expect(appenderRefs, "append + one retry re-append").toHaveLength(2);
+    expect(fs.existsSync(path.join(repoRoot, "scripts", "append-drill-log.cjs")), "the appender script exists").toBe(true);
+    expect(drillWorkflowSource, "the retry loop is bounded at 3 attempts").toContain("-gt 3");
+
+    // Exactly one npm ci — the drill job, which needs the real dependency
+    // tree. The append job deliberately installs nothing: its script is
+    // builtin-only, and the pin below holds it to that (adding a dependency
+    // there would silently break the workflow's least-install design).
+    expect((drillWorkflowSource.match(/npm ci/g) ?? []).length, "npm ci only in the drill job").toBe(1);
+    const appenderSource = stripLineComments(fs.readFileSync(path.join(repoRoot, "scripts", "append-drill-log.cjs"), "utf8"));
+    const requires = [...appenderSource.matchAll(/require\("([^"]+)"\)/g)].map((m) => m[1]);
+    expect(requires, "the appender is builtin-only — this is why the append job installs nothing").toEqual([
+      "node:fs",
+      "node:crypto",
+      "node:path",
+    ]);
+    expect(drillWorkflowSource, "drill output is captured via tee").toContain("tee drill-output.txt");
+    expect(drillWorkflowSource, "exit code propagates through the pipe").toContain("PIPESTATUS[0]");
+
+    // code → doc: every node-invoked .cjs in the workflow exists on disk.
+    for (const ref of new Set([...drillWorkflowSource.matchAll(/scripts\/[\w./-]+\.cjs/g)].map((m) => m[0]))) {
+      expect(fs.existsSync(path.join(repoRoot, ref)), `${ref} exists`).toBe(true);
+    }
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
@@ -1315,7 +1411,7 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
     ).toEqual([]);
   });
 
-  it("drift class 8: the chain digest algorithm is pinned identically in the drill writer, the CI appender, the refill, and this lint", () => {
+  it("drift class 8: the chain digest algorithm is pinned identically in the drill writer, the CI appender, the refill, the settings service, and this lint", () => {
     // The chain's guarantees hold only while all four implementations hash
     // the same bytes with the same algorithm. Each is pinned by STRUCTURAL
     // markers with exact occurrence counts over comment-stripped source —
@@ -1371,6 +1467,24 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
     expect(count(lintCode, sha256Call), "lint: exactly one sha256 site").toBe(1);
     expect(count(lintCode, lintReplay), "lint: replay boundary is the line prefix + LF").toBe(1);
     expect(count(lintCode, normalizeAtom), "lint: LF-normalizes the log before replay").toBe(1);
+
+    // The fifth implementation: app/services/guardsChain.ts replays the
+    // chain at read time for the Settings page (guards:getChainState), with
+    // an incremental walk over chainLines — the same byte semantics, so the
+    // GUI renders the state npm test would compute.
+    const servicePath = path.join(repoRoot, "app", "services", "guardsChain.ts");
+    expect(fs.existsSync(servicePath), "the guards-chain service exists").toBe(true);
+    const service = stripLineComments(fs.readFileSync(servicePath, "utf8"));
+    expect(count(service, sha256Call), "service: exactly one sha256 site").toBe(1);
+    expect(
+      count(service, M("logLines.slice(0, i).", 'join(LINE_END) + LINE_END')),
+      "service: replay boundary is the line prefix + LINE_END"
+    ).toBe(1);
+    const serviceNormalize = M("raw.replace(/\\r\\n/g, ", '"\\n")');
+    expect(
+      count(service, serviceNormalize),
+      "service: LF-normalizes the log before replay"
+    ).toBe(1);
   });
 
   it("drift class 8: every CI summary line in GUARDS-LOG.md is well-formed", () => {

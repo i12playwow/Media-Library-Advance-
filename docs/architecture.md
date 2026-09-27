@@ -42,8 +42,9 @@ this table):
 | `player:*` | playback | `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4` |
 | `subtitle:*` | subtitle generation and local subtitle directories | `subtitle:addDir`, `subtitle:removeDir`, `subtitle:scan`, `subtitle:generateForMovie`, `subtitle:getModelAvailability`, `subtitle:downloadModel`, `subtitle:previewOutput`, `subtitle:modelDownloadProgress` (push) |
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
+| `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState` |
 
-12 prefixes, 54 invoke channels (one `ipcMain.handle` each, all in main.ts),
+13 prefixes, 55 invoke channels (one `ipcMain.handle` each, all in main.ts),
 3 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
 `onSubtitleModelDownloadProgress`).

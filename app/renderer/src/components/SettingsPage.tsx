@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { GuardsChainSection } from "./GuardsChainCard";
 import type {
   AppShellState,
   MetadataSettings,
@@ -706,6 +707,9 @@ export function SettingsPage({
             </div>
           </div>
         </div>
+
+        {/* ── Guards chain ── */}
+        <GuardsChainSection />
 
         {/* ── System ── */}
         <div className="panel">

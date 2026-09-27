@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppShellState,
   ConvertVideoResult,
+  GuardsChainState,
   MetadataSettings,
   LibraryMode,
   MovieRecord,
@@ -35,7 +36,10 @@ const api = {
     ipcRenderer.invoke("settings:getThemeMode"),
   setThemeMode: (themeMode: "dark" | "light"): Promise<AppShellState> =>
     ipcRenderer.invoke("settings:setThemeMode", themeMode),
-  getAppState: (): Promise<AppShellState> => ipcRenderer.invoke("app:getState"),
+  getAppState: (): Promise<AppShellState> =>
+    ipcRenderer.invoke("app:getState"),
+  getGuardsChainState: (): Promise<GuardsChainState> =>
+    ipcRenderer.invoke("guards:getChainState"),
   saveMetadataSettings: (settings: MetadataSettings): Promise<AppShellState> =>
     ipcRenderer.invoke("settings:saveMetadata", settings),
   saveOrganizationSettings: (settings: OrganizationSettings): Promise<AppShellState> =>
