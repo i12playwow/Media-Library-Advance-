@@ -1,0 +1,87 @@
+{
+    "name": "medialibrary-plus",
+    "version": "1.0.0",
+    "description": "MLA+ desktop media library app",
+    "main": "dist/main/main.js",
+    "scripts": {
+        "build": "tsc -b && vite build",
+        "postinstall": "electron-builder install-app-deps",
+        "start": "npm run rebuild:electron && electron .",
+        "dev": "node scripts/dev.cjs",
+    "rebuild:node": "node scripts/rebuild-node.cjs",
+    "rebuild:electron": "node scripts/rebuild-electron.cjs",
+    "verify:abi": "node scripts/abi-check.cjs",
+    "verify:abi:electron": "node scripts/abi-check.cjs --electron",
+    "diagnose:abi": "node scripts/diagnose-abi.cjs",
+    "drill:abi": "node scripts/drill-abi-contract.cjs",
+    "pretest": "npm run verify:abi",
+    "test": "vitest run",
+    "pretest:e2e": "npm run rebuild:electron && npm run verify:abi:electron",
+    "test:e2e": "npm run build && playwright test",
+      "dist": "electron-builder --win --x64"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "electron": true,
+    "esbuild": true,
+    "ffmpeg-static": true,
+    "lzma-native": true
+  },
+    "author": "Theo",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0",
+        "better-sqlite3": "^12.8.0",
+        "express": "^4.18.2",
+        "ffmpeg-static": "^5.3.0",
+        "ffprobe-static": "^3.1.0",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+        "zod": "^3.25.76"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.59.1",
+        "@testing-library/jest-dom": "^6.9.1",
+        "@testing-library/react": "^16.3.0",
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/express": "^4.17.21",
+        "@types/node": "^22.0.0",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^6.0.1",
+        "electron": "^41.1.1",
+        "electron-builder": "^24.6.0",
+        "electron-rebuild": "^3.2.9",
+        "happy-dom": "^18.0.1",
+        "node-abi": "^4.28.0",
+        "playwright": "^1.59.1",
+        "vitest": "^3.2.4",
+        "typescript": "^5.5.0",
+        "vite": "^8.0.4"
+    },
+    "type": "commonjs",
+    "build": {
+        "appId": "com.example.mla",
+        "productName": "MediaLibrary Plus",
+        "files": [
+            "dist/**/*",
+            "resources/**"
+        ],
+        "directories": {
+            "buildResources": "resources",
+            "output": "dist_electron"
+        },
+        "win": {
+            "icon": "resources/icon.ico",
+            "target": [
+                "nsis"
+            ],
+            "artifactName": "MediaLibrary-Plus-Setup-${version}.exe"
+        },
+        "nsis": {
+            "oneClick": false,
+            "perMachine": false,
+            "allowElevation": true,
+            "allowToChangeInstallationDirectory": true
+        }
+    }
+}

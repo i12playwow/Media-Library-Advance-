@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions current: Dependabot reads the version
+  # comment next to each pin and opens one grouped PR that moves the SHA
+  # and its comment together — the full-SHA shape the doc-drift lint
+  # requires, so every bump stays inside the pinning contract.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5

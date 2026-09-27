@@ -1,0 +1,37 @@
+.topbarFlex {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.noMoviesSubtle {
+  padding: 1rem;
+}
+
+.saveBtnFull {
+  width: 100%;
+}
+
+.configRelative {
+  position: relative;
+  display: inline-block;
+}
+
+.subSearchRow {
+  gap: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.subSearchInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.candidatesWrap {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+

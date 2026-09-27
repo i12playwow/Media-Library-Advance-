@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "rootDir": "app",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "app/main/**/*.ts",
+    "app/services/**/*.ts",
+    "app/database/**/*.ts",
+    "app/shared/**/*.ts"
+  ]
+}

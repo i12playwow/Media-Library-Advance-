@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  # Nightly: dependency drift (Electron, better-sqlite3, Playwright, runner
+  # images) shows up here without burning e2e minutes on every push.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  # Callable so the label-gated PR path (pr-e2e.yml) can run this same e2e
+  # job against a PR's merge ref; ordinary PR pushes never pay the cost.
+  workflow_call:
+    inputs:
+      e2e-ref:
+        type: string
+        required: false
+        default: ""
+
+# Shared runners are a shared budget: a new push to the same ref makes any
+# in-progress run for that ref obsolete. The event name is part of the group
+# so a scheduled run can never cancel a push run — both happen on
+# refs/heads/master.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit & Component Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm ci runs postinstall, which leaves the binding built for the
+      # Electron ABI. Rebuild for Node explicitly so the pure pretest gate
+      # proves the unit-ready state instead of aborting on the mismatch.
+      - name: Rebuild better-sqlite3 for Node
+        run: npm run rebuild:node
+
+      - name: Run tests
+        run: npm test
+
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check renderer
+        run: npx tsc --project tsconfig.renderer.json --noEmit
+
+      - name: Type-check main process
+        run: npx tsc --project tsconfig.main.json --noEmit
+
+  e2e:
+    name: Electron E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The label-gated PR path passes the PR's merge ref; every other
+          # trigger checks out its own ref.
+          ref: ${{ inputs.e2e-ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Electron binary (with its build headers) and the Playwright
+      # browsers are pinned by the lockfile, so one hash keys both caches;
+      # postinstall skips anything the cache already holds. The cache is
+      # inert to the ABI contract — it stores downloads, never the binding.
+      - name: Cache Electron binary and Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-electron-browsers-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-browsers-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Chromium's system libraries are what the Electron binary needs on
+      # Linux; the gate needs them installed to prove the binding live
+      # (ELECTRON_RUN_AS_NODE) instead of degrading to the parse-only
+      # fallback. apt mirror hiccups are routine on shared runners, so the
+      # install gets three attempts (Playwright elevates via sudo itself);
+      # and because install-deps exits 0 as a silent no-op when it does not
+      # recognize the distro, the libraries' landing is proven via the
+      # linker cache before anything depends on them.
+      - name: Install Electron system dependencies
+        run: |
+          ok=0
+          for attempt in 1 2 3; do
+            if npx playwright install-deps chromium; then ok=1; break; fi
+            echo "playwright install-deps attempt $attempt failed; retrying in 15s"
+            sleep 15
+          done
+          if [ "$ok" = 0 ]; then
+            echo "playwright install-deps failed after 3 attempts" >&2
+            exit 1
+          fi
+          if ! ldconfig -p 2>/dev/null | grep -q "libnss3.so"; then
+            echo "libnss3.so missing from the linker cache; install-deps was a silent no-op" >&2
+            exit 1
+          fi
+          echo "Electron system libraries verified in the linker cache"
+
+      # postinstall should have downloaded the Electron binary; if it did
+      # not, the gate below would degrade to a parse-only verdict (rule 4).
+      # This makes that silent downgrade impossible to miss.
+      - name: Verify the Electron runtime is installed
+        run: test -x node_modules/electron/dist/electron
+
+      # Prove the state npm ci actually left behind — before pretest:e2e
+      # gets any chance to heal. A postinstall regression surfaces here as
+      # a red gate, not as a silent repair.
+      - name: Prove the postinstall ABI
+        run: npm run verify:abi:electron
+
+      - name: Run the e2e suite
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" npm run test:e2e
+
+      # Playwright retains traces, screenshots, and videos for failed tests
+      # under test-results/ (see playwright.config.ts); attach them to the
+      # run so a red job is diagnosable without a re-run.
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-failure-diagnostics
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # A red nightly run must not wait for morning to be noticed. The
+      # webhook URL lives in the CI_ALERT_WEBHOOK secret; when it is unset
+      # the step skips quietly (forks, unconfigured repos). The payload is
+      # Slack-compatible (text) and Discord-compatible (content) at once.
+      - name: Notify on failure
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.CI_ALERT_WEBHOOK }}
+          GH_REPO_NAME: ${{ github.repository }}
+          GH_EVENT_NAME: ${{ github.event_name }}
+          GH_COMMIT_SHA: ${{ github.sha }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "CI_ALERT_WEBHOOK not configured; skipping notification"
+            exit 0
+          fi
+          message="\ud83d\u534 $GH_REPO_NAME — Electron E2E failed ($GH_EVENT_NAME) on $GH_COMMIT_SHA — $GH_SERVER_URL/$GH_REPO_NAME/actions/runs/$GH_RUN_ID"
+          payload=$(printf '{"text": "%s", "content": "%s"}' "$message" "$message")
+          for attempt in 1 2; do
+            if curl -fsS --max-time 15 -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK_URL"; then
+              exit 0
+            fi
+            echo "webhook attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
+          echo "webhook notification could not be delivered" >&2
+          exit 1

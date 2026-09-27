@@ -1,0 +1,9 @@
+# GUARDS-LOG.md is append-only and written by the drill (and Actions) with
+# LF endings; autocrlf smudging it to CRLF on Windows checkouts would make
+# its bytes unstable across machines, so it is pinned to LF.
+GUARDS-LOG.md text eol=lf
+
+# Same for the workflow files: byte-stable across machines, so the lint's
+# line-based checks (SHA pinning, log format) read the same bytes the CI
+# runner sees.
+.github/workflows/*.yml text eol=lf

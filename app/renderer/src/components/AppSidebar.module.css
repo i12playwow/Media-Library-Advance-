@@ -1,0 +1,4 @@
+.dynamicWidth {
+  width: var(--sidebarWidth, 280px);
+}
+

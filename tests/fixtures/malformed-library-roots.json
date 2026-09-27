@@ -1,0 +1,4 @@
+{
+  "normal": "C:/broken/normal",
+  "gentle": ["C:/broken/gentle", null, 42, ""]
+}

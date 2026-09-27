@@ -1,0 +1,23 @@
+name: PR E2E (label-gated)
+
+# ABI-sensitive PRs get the full Electron e2e suite on demand: add the
+# `run-e2e` label to the PR. The job definition lives in ci.yml
+# (workflow_call); this caller only gates it behind the label, so ordinary
+# PR pushes never pay the e2e cost. It runs against the PR's merge ref,
+# from the base branch's copy of the workflow — the same contract CI runs
+# on master.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: PR Electron E2E
+    if: github.event.label.name == 'run-e2e'
+    uses: ./.github/workflows/ci.yml
+    with:
+      e2e-ref: refs/pull/${{ github.event.pull_request.number }}/merge
+    secrets: inherit
