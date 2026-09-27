@@ -153,7 +153,17 @@ if (!process.env.CI) {
     ...legs.map((l, i) => `| ${i + 1} | ${l.id}. ${l.label} | ${l.ok ? "✅" : "❌"} | ${l.kind} | ${l.detail} |`),
     "",
   ].join("\n");
-  fs.appendFileSync(GUARDS_LOG, entry, "utf8");
+  // Tamper-evident chain: the chain line records the sha256 of every byte
+  // before IT — the pre-append file PLUS this entry's own bytes — LF-
+  // normalized, plus the running entry count. Editing, dropping, or
+  // reordering history breaks every chain line after the edit, and
+  // docsSearchRefs.test.ts's drift class 8 verifies the chain on every npm
+  // test. scripts/refill-log-chain.cjs re-seeds after a legitimate rewrite.
+  const normalized = fs.readFileSync(GUARDS_LOG, "utf8").replace(/\r\n/g, "\n");
+  const withEntry = normalized + entry;
+  const digest = require("node:crypto").createHash("sha256").update(withEntry, "utf8").digest("hex");
+  const entryCount = (withEntry.match(/^## /gm) || []).length;
+  fs.appendFileSync(GUARDS_LOG, withEntry + `- chain: ${digest} · entries ${entryCount}\n`, "utf8");
   process.stdout.write(`\nappended drill entry to GUARDS-LOG.md\n`);
 }
 

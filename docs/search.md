@@ -45,6 +45,10 @@ That is the complete set: five methods, one insert, three updates, one
 delete-pair. The remaining `UPDATE`/`DELETE` statements in database.ts touch
 other tables (`subtitles`, `settings`, `actress_*`) and are out of this
 table's scope — the lint keys on `movies`-table statements specifically.
+Both tables also pin each listed method's complete string-literal
+inventory (double-quoted and template literals alike): a statement that
+gains a literal it did not document — a widened `WHERE`, an extra clause —
+fails `npm test` even when the documented SQL still appears inside it.
 
 ## The read-path table
 

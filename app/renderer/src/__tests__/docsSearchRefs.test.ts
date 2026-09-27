@@ -25,7 +25,8 @@ import path from "node:path";
 //     match database.ts in both directions: every write or read site
 //     documented with its SQL, every write or read site in the code covered
 //     by the tables — in class methods and module-level functions alike,
-//     with conservation checks so no unsliced shape stays silent;
+//     each named unit's full string-literal inventory pinned exactly, with
+//     conservation checks so no unsliced shape stays silent;
 //
 //   drift class 6 — architecture.md's IPC surface table must match the
 //     code in both directions: prefixes used = prefixes documented, every
@@ -43,9 +44,11 @@ import path from "node:path";
 //     Electron ABI; every gate script is wired and exists; the drill
 //     drives the scripts it claims to.
 //
-//   drift class 8 — GUARDS-LOG.md stays parseable: the latest local entry
-//     matches the drill's leg catalog, and every CI summary line is
-//     well-formed.
+//   drift class 8 — GUARDS-LOG.md stays parseable AND tamper-evident: the
+//     latest local entry matches the drill's leg catalog, every CI summary
+//     line is well-formed, every entry carries a chain-line digest of all
+//     bytes before it (edits/drops/reorders of history break the chain),
+//     and every line belongs to the drill/CI vocabulary — no foreign lines.
 //
 //   drift class 9 — testing.md's rules 4/5/6 describe how the gate, drill,
 //     and healer actually work; the lint pins the script structure those
@@ -421,7 +424,13 @@ function lintItBodies(code: string): string[] {
 // ── drift class 4 data: the movies-table write-path table (search.md) ──────
 // Fragments are the SQL as it appears in database.ts; doc→code checks each
 // against the source, code→doc checks every movies write site is covered.
-const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[] }> = [
+// `exact` pins the FULL string-literal inventory of the unit (template
+// literals and signature unions included): substring fragments alone would
+// let a widened statement ("WHERE id = ? AND …") still contain the
+// documented SQL. Comparisons normalize whitespace, so the entries can be
+// written as the same one-liners as `fragments` while the code's multi-line
+// templates still match.
+const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: string[] }> = [
   {
     method: "upsertMovie",
     fragments: [
@@ -429,22 +438,35 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[] }> = [
       // conflict behavior is part of the search contract.
       "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at",
     ],
+    exact: [
+      "none",
+      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at",
+    ],
   },
   {
     method: "deleteMovie",
     fragments: ["DELETE FROM subtitles WHERE movie_id = ?", "DELETE FROM movies WHERE id = ?"],
+    exact: ["DELETE FROM subtitles WHERE movie_id = ?", "DELETE FROM movies WHERE id = ?"],
   },
   {
     method: "updateMovieLocation",
     fragments: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
+    exact: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
   },
   {
     method: "updateMoviePoster",
     fragments: ["UPDATE movies SET poster_url = ?, poster_source = ?, updated_at = ? WHERE id = ?"],
+    exact: [
+      "none",
+      "local",
+      "web",
+      "UPDATE movies SET poster_url = ?, poster_source = ?, updated_at = ? WHERE id = ?"
+    ],
   },
   {
     method: "updateMovieVideoId",
     fragments: ["UPDATE movies SET video_id = ?, updated_at = ? WHERE id = ?"],
+    exact: ["UPDATE movies SET video_id = ?, updated_at = ? WHERE id = ?"],
   },
 ];
 
@@ -479,8 +501,14 @@ const moduleFunctionBody = (source: string, name: string): string => {
 const writeToken = /INSERT INTO movies|UPDATE movies|DELETE FROM movies/g;
 const readToken = /(?:FROM|JOIN) movies/g;
 const deleteToken = /DELETE FROM movies/g;
+// Both quote styles: the single-purpose statements are double-quoted, but
+// the clause-builders and the write methods assemble SQL from template
+// literals — a double-quote-only extractor would silently miss them.
 const literalsOf = (body: string): string[] =>
-  [...body.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+  [
+    ...body.matchAll(/"((?:[^"\\]|\\.)*)"/g),
+    ...body.matchAll(/`((?:[^`\\]|\\.)*)`/g),
+  ].map((m) => m[1]);
 
 // ── drift class 4 data: the movies read-path table (search.md) ─────────────
 // The query side: every FROM/JOIN-movies statement in database.ts, with the
@@ -512,7 +540,10 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "ORDER BY updated_at DESC, title ASC",
       " ",
       "?",
-      ","
+      ",",
+      "%${query}%",
+      "WHERE ${clauses.join(\" AND \")}",
+      "SELECT * FROM subtitles WHERE movie_id IN (${placeholders}) ORDER BY language ASC"
     ],
   },
   {
@@ -528,7 +559,9 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "SELECT * FROM movies",
       " AND ",
       "",
-      " "
+      " ",
+      "%${query}%",
+      "WHERE ${clauses.join(\" AND \")}"
     ],
   },
   {
@@ -778,7 +811,8 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
 
   // Loads the real @playwright/test via the config; give the cold-start
   // require a generous budget instead of racing vitest's 5s default.
-  it("playwright.config.ts keeps the flake budget CI-only and capture failure-only, as promised", { timeout: 30_000 }, () => {
+  // Observed at 45s under heavy machine load, hence 60s.
+  it("playwright.config.ts keeps the flake budget CI-only and capture failure-only, as promised", { timeout: 60_000 }, () => {
     const inCi = resolvePlaywrightConfig({ CI: "1" });
     const locally = resolvePlaywrightConfig({});
 
@@ -957,6 +991,15 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
         found.length,
         `${row.method}() contains ${found.length} movies write statements but docs/search.md documents ${moviesFragments} — update the write-path table (drift class 4)`
       ).toBe(moviesFragments);
+      // 1b. literal-set pinning: the FULL inventory of the unit's string
+      // literals (whitespace-normalized, both quote styles) must equal the
+      // documented set — a widened or extra statement literal fails here.
+      const actual = [...literalsOf(ownedSlice)].map(norm).sort();
+      const expected = [...row.exact].map(norm).sort();
+      expect(
+        actual,
+        `${row.method}()'s SQL string literals have drifted from docs/search.md's write-path table — update the table and the statement together (drift class 4)`
+      ).toEqual(expected);
     }
 
     // 2. The scalable tripwire, over every unit in the file: every
@@ -1050,8 +1093,11 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
     // ("WHERE id = ? OR id = ?") still *contains* the documented SQL, so
     // only exact-set equality catches it.
     for (const row of SEARCH_READ_PATHS) {
-      const actual = [...literalsOf(unitBody(row.method))].sort();
-      const expected = [...row.exact].sort();
+      // Whitespace-normalized comparison: the entries are written as the
+      // same one-liners as `fragments`, while template-literal SQL in the
+      // code is multi-line.
+      const actual = [...literalsOf(unitBody(row.method))].map(norm).sort();
+      const expected = [...row.exact].map(norm).sort();
       expect(
         actual,
         `${row.method}()'s SQL string literals have drifted from docs/search.md's read-path table — update the table and the reader together (drift class 4)`
@@ -1183,6 +1229,73 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
 
     const rows = [...entry.matchAll(/^\| \d+ \| (.+?) \| (✅|❌) \| (contract|restore) \| .+? \|$/gm)].map((m) => m[1].trim());
     expect(rows, "latest entry covers the full leg catalog").toEqual(LEG_LABELS);
+
+    // Tamper-evident chain: every entry carries a chain line digesting ALL
+    // bytes before it (LF-normalized) plus the running entry count. The
+    // drill chains its own append, so the newest entry is chained from
+    // birth; scripts/refill-log-chain.cjs re-seeds the whole chain after a
+    // legitimate rewrite. Editing, dropping, or reordering any historical
+    // byte breaks every chain line after the edit. (Tamper-EVIDENT, not
+    // signed: a deliberate rewrite that recomputes the whole chain passes —
+    // visibly, as a re-committed log. Truncating the newest entry outright
+    // leaves no in-file trace; that is what git history is for.)
+    const crypto = require("node:crypto");
+    const chainLineRe = /^- chain: ([0-9a-f]{64}) · entries (\d+)$/;
+    const normalizedLog = log.replace(/\r\n/g, "\n");
+    const logLines = normalizedLog.split("\n");
+    let seenEntries = 0;
+    const chainDigests: string[] = [];
+    for (let i = 0; i < logLines.length; i++) {
+      if (/^## /.test(logLines[i])) seenEntries++;
+      const m = chainLineRe.exec(logLines[i]);
+      if (!m) continue;
+      const digest = crypto
+        .createHash("sha256")
+        .update(logLines.slice(0, i).join("\n") + "\n", "utf8")
+        .digest("hex");
+      chainDigests.push(m[1]);
+      expect(
+        m[1],
+        `chain line ${chainDigests.length} digests every byte before it — history before this point was edited, dropped, or reordered since it was written (legitimate rewrite: node scripts/refill-log-chain.cjs, then commit the re-seeded log)`
+      ).toBe(digest);
+      expect(
+        Number(m[2]),
+        `chain line ${chainDigests.length} claims ${m[2]} entries, but ${seenEntries} entries precede it`
+      ).toBe(seenEntries);
+    }
+    expect(
+      chainDigests.length,
+      "every drill entry must carry a chain line (seed or re-seed with scripts/refill-log-chain.cjs)"
+    ).toBe(entryHeaders.length);
+
+    // Closed line vocabulary: the log may contain only the line kinds the
+    // drill and the CI append produce. A foreign line — appended tail text,
+    // injected commentary, anything — fails here, even where the byte chain
+    // above is silent (bytes after the final chain line are outside it).
+    const vocabulary: Array<[RegExp, string]> = [
+      [/^# /, "title"],
+      [/^## \d{4}-/, "entry header"],
+      [/^- node .+ · better-sqlite3 .+ · electron .+ · commit .+ · \w+ · \d+s$/, "entry metadata"],
+      [/^\|/, "leg table"],
+      [/^- \d{4}-\d{2}-\d{2}T.+ · ci · /, "CI summary line"],
+      [chainLineRe, "chain line"],
+    ];
+    const foreign: string[] = [];
+    let inHeader = true;
+    for (const line of logLines) {
+      if (/^## /.test(line)) inHeader = false;
+      if (line.trim() === "") continue;
+      // Free prose is allowed only in the header region (before the first
+      // entry) — those bytes are inside entry 1's chain digest, so they are
+      // still tamper-evident. Everything after the first entry is closed
+      // vocabulary: drill and CI output only.
+      if (inHeader) continue;
+      if (!vocabulary.some(([re]) => re.test(line))) foreign.push(line);
+    }
+    expect(
+      foreign,
+      `GUARDS-LOG.md contains line(s) no drill or CI append produces: ${foreign.map((l) => JSON.stringify(l.slice(0, 80))).join(" | ") || "none"} — the log is append-only drill output (drift class 8)`
+    ).toEqual([]);
   });
 
   it("drift class 8: every CI summary line in GUARDS-LOG.md is well-formed", () => {
