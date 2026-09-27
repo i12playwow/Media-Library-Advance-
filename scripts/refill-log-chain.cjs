@@ -1,23 +1,22 @@
 // refill-log-chain.cjs — back-compute GUARDS-LOG.md's tamper-evident chain.
 //
-// Every drill entry in GUARDS-LOG.md ends with a chain line:
+// The log is a sequence of chained SEGMENTS. A segment is either a drill
+// entry (one `## ` header through its leg table's last row) or a batch of CI
+// summary lines absorbed between segments. Each segment ends with a chain
+// line:
 //
-//   - chain: <sha256-hex-of-all-bytes-before-this-line> · entries <count>
+//   - chain: <sha256-of-all-bytes-before-this-line> · entries <count>
 //
-// where <count> is the number of `## ` entry headers in those same bytes
-// (LF-normalized). docsSearchRefs.test.ts's drift class 8 verifies the chain
-// on every npm test, making history tamper-evident: editing, dropping, or
-// reordering any historical byte breaks every chain line after the edit.
+// (LF-normalized; <count> = `## ` headers so far). The drill writer chains
+// its own entries, scripts/append-drill-log.cjs chains CI batches, and
+// docsSearchRefs.test.ts's drift class 8 replays the whole chain on every
+// npm test — including the invariant that the file ENDS with a chain line.
 //
 // Run this script ONLY to (a) seed the chain the first time, or (b) re-seed
-// after a *legitimate* edit to the log (fixing a typo, redacting a secret) —
-// the lint cannot distinguish an honest rewrite from a dishonest one, so the
-// remedy is a deliberate, visible re-commit of the whole chain. CI summary
-// lines carry no chain of their own; they are absorbed into the next entry's
-// chain digest.
-//
-// The script verifies its own output with the same replay the lint performs
-// BEFORE writing; it never leaves a broken chain on disk.
+// after a *legitimate* edit to the log — the lint cannot distinguish an
+// honest rewrite from a dishonest one, so the remedy is a deliberate, visible
+// re-commit. The script verifies its own output with the same replay the
+// lint performs BEFORE writing; it never leaves a broken chain on disk.
 
 const fs = require("node:fs");
 const crypto = require("node:crypto");
@@ -25,29 +24,35 @@ const path = require("node:path");
 
 const LOG = path.join(__dirname, "..", "GUARDS-LOG.md");
 const CHAIN_LINE_RE = /^- chain: [0-9a-f]{64} · entries \d+$/;
+const CI_LINE_RE = /^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z · ci · /;
 const normalize = (s) => s.replace(/\r\n/g, "\n");
 
-// ── the verifier, identical in spirit to drift class 8's replay ────────────
+// ── the verifier, the same replay drift class 8 performs ───────────────────
 function verify(lines) {
   let seenEntries = 0;
-  let chains = 0;
+  let segments = 0;
   for (let i = 0; i < lines.length; i++) {
     if (/^## /.test(lines[i])) seenEntries++;
     const m = /^- chain: ([0-9a-f]{64}) · entries (\d+)$/.exec(lines[i]);
     if (!m) continue;
-    chains++;
+    segments++;
     const digest = crypto
       .createHash("sha256")
       .update(lines.slice(0, i).join("\n") + "\n", "utf8")
       .digest("hex");
-    if (m[1] !== digest) return { ok: false, why: `chain line ${chains} digest mismatch` };
-    if (Number(m[2]) !== seenEntries) return { ok: false, why: `chain line ${chains} entry count mismatch` };
+    if (m[1] !== digest) return { ok: false, why: `chain line ${segments} digest mismatch` };
+    if (Number(m[2]) !== seenEntries) return { ok: false, why: `chain line ${segments} entry count mismatch` };
   }
-  if (chains !== seenEntries) return { ok: false, why: `${chains} chain lines for ${seenEntries} entries` };
+  // Tip invariant: the last non-blank line must be a chain line.
+  let tip = lines.length - 1;
+  while (tip >= 0 && lines[tip].trim() === "") tip--;
+  if (tip < 0 || !CHAIN_LINE_RE.test(lines[tip])) {
+    return { ok: false, why: "the log does not end with a chain line" };
+  }
   return { ok: true };
 }
 
-// ── rebuild: strip old chain lines, re-place one per entry ─────────────────
+// ── rebuild: strip old chain lines, re-place one per segment ───────────────
 const raw = normalize(fs.readFileSync(LOG, "utf8"));
 const lines = raw.split("\n").filter((l) => !CHAIN_LINE_RE.test(l));
 
@@ -60,6 +65,14 @@ if (entryStarts.length === 0) {
   process.exit(1);
 }
 
+function digestOf(out) {
+  return crypto.createHash("sha256").update(out.join("\n") + "\n", "utf8").digest("hex");
+}
+function chainFor(out) {
+  const entries = out.filter((l) => /^## /.test(l)).length;
+  return `- chain: ${digestOf(out)} · entries ${entries}`;
+}
+
 const out = [];
 // Header region: everything before the first entry, verbatim.
 out.push(...lines.slice(0, entryStarts[0]));
@@ -67,21 +80,22 @@ out.push(...lines.slice(0, entryStarts[0]));
 for (let e = 0; e < entryStarts.length; e++) {
   const start = entryStarts[e];
   const blockEnd = e + 1 < entryStarts.length ? entryStarts[e + 1] : lines.length;
-  // The entry's own lines: start .. last non-blank line of the block.
+  // The entry's own lines run to its last leg-table row.
   let last = blockEnd - 1;
-  while (last > start && lines[last].trim() === "") last--;
+  while (last > start && !/^\|/.test(lines[last]) && lines[last].trim() !== "") last--;
+  while (last > start && !/^\|/.test(lines[last])) last--;
   out.push(...lines.slice(start, last + 1));
-  // The gap after the entry (trailing blanks + CI summary lines) is carried
-  // into the digest only for entries that are followed by such lines before
-  // the next entry — CI lines belong to the NEXT entry's digest boundary,
-  // matching the drill writer, which chains immediately after its table.
+  out.push(chainFor(out));
+  // Any CI summary lines between this entry's table and the next header
+  // form their own chained segment.
+  const ciLines = lines.slice(last + 1, blockEnd).filter((l) => CI_LINE_RE.test(l));
+  if (ciLines.length > 0) {
+    out.push(...ciLines);
+    out.push(chainFor(out));
+  }
+  // Canonical blank separator before the next entry (or EOF); the tip
+  // invariant ignores trailing blanks.
   out.push("");
-  const prefix = out.join("\n") + "\n";
-  const digest = crypto.createHash("sha256").update(prefix, "utf8").digest("hex");
-  out.push(`- chain: ${digest} · entries ${e + 1}`);
-  // Preserve whatever sat between this entry's last line and the next
-  // header (blank separators, CI summary lines), minus old chain lines.
-  out.push(...lines.slice(last + 1, blockEnd));
 }
 
 const verdict = verify(out);
@@ -95,4 +109,4 @@ if (result === raw) {
   process.exit(0);
 }
 fs.writeFileSync(LOG, result, "utf8");
-console.log(`chain verified before write: ${entryStarts.length} chain line(s) across ${entryStarts.length} entr(ies)`);
+console.log(`chain verified before write: rebuilt across ${entryStarts.length} entr(ies)`);

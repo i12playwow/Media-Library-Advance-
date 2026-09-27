@@ -46,9 +46,12 @@ import path from "node:path";
 //
 //   drift class 8 — GUARDS-LOG.md stays parseable AND tamper-evident: the
 //     latest local entry matches the drill's leg catalog, every CI summary
-//     line is well-formed, every entry carries a chain-line digest of all
-//     bytes before it (edits/drops/reorders of history break the chain),
-//     and every line belongs to the drill/CI vocabulary — no foreign lines.
+//     line is well-formed, every segment (drill entry or CI batch chained
+//     by scripts/append-drill-log.cjs) carries a digest of all bytes before
+//     it, the log must end with a chain line, and every line belongs to the
+//     drill/CI vocabulary — no foreign lines. The digest algorithm itself is
+//     pinned identically across the drill writer, the CI appender, the
+//     refill, and this lint by structural markers with exact counts.
 //
 //   drift class 9 — testing.md's rules 4/5/6 describe how the gate, drill,
 //     and healer actually work; the lint pins the script structure those
@@ -1230,43 +1233,57 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
     const rows = [...entry.matchAll(/^\| \d+ \| (.+?) \| (✅|❌) \| (contract|restore) \| .+? \|$/gm)].map((m) => m[1].trim());
     expect(rows, "latest entry covers the full leg catalog").toEqual(LEG_LABELS);
 
-    // Tamper-evident chain: every entry carries a chain line digesting ALL
-    // bytes before it (LF-normalized) plus the running entry count. The
-    // drill chains its own append, so the newest entry is chained from
-    // birth; scripts/refill-log-chain.cjs re-seeds the whole chain after a
-    // legitimate rewrite. Editing, dropping, or reordering any historical
-    // byte breaks every chain line after the edit. (Tamper-EVIDENT, not
-    // signed: a deliberate rewrite that recomputes the whole chain passes —
-    // visibly, as a re-committed log. Truncating the newest entry outright
-    // leaves no in-file trace; that is what git history is for.)
+    // Tamper-evident chain over SEGMENTS: a segment ends at the last line
+    // before the next `- chain:` line — either a drill entry (one `## `
+    // header with metadata, leg table, trailing blanks) or a batch of CI
+    // summary lines absorbed before the next entry. Every segment's chain
+    // line digests ALL bytes before it (LF-normalized); the drill writer and
+    // scripts/append-drill-log.cjs chain their own appends, so the log ends
+    // with a chain line at every commit, and scripts/refill-log-chain.cjs
+    // re-seeds after a legitimate rewrite. Editing, dropping, or reordering
+    // any historical byte breaks every chain line after the edit.
+    // (Tamper-EVIDENT, not signed: a deliberate rewrite that recomputes the
+    // whole chain passes — visibly, as a re-committed log.)
     const crypto = require("node:crypto");
     const chainLineRe = /^- chain: ([0-9a-f]{64}) · entries (\d+)$/;
     const normalizedLog = log.replace(/\r\n/g, "\n");
     const logLines = normalizedLog.split("\n");
     let seenEntries = 0;
-    const chainDigests: string[] = [];
+    let segment = 0;
     for (let i = 0; i < logLines.length; i++) {
       if (/^## /.test(logLines[i])) seenEntries++;
       const m = chainLineRe.exec(logLines[i]);
       if (!m) continue;
+      segment++;
       const digest = crypto
         .createHash("sha256")
         .update(logLines.slice(0, i).join("\n") + "\n", "utf8")
         .digest("hex");
-      chainDigests.push(m[1]);
       expect(
         m[1],
-        `chain line ${chainDigests.length} digests every byte before it — history before this point was edited, dropped, or reordered since it was written (legitimate rewrite: node scripts/refill-log-chain.cjs, then commit the re-seeded log)`
+        `chain line ${segment} digests every byte before it — history before this point was edited, dropped, or reordered since it was written (legitimate rewrite: node scripts/refill-log-chain.cjs, then commit the re-seeded log)`
       ).toBe(digest);
       expect(
         Number(m[2]),
-        `chain line ${chainDigests.length} claims ${m[2]} entries, but ${seenEntries} entries precede it`
+        `chain line ${segment} claims ${m[2]} entries, but ${seenEntries} entries precede it`
       ).toBe(seenEntries);
     }
     expect(
-      chainDigests.length,
-      "every drill entry must carry a chain line (seed or re-seed with scripts/refill-log-chain.cjs)"
-    ).toBe(entryHeaders.length);
+      segment,
+      "the log carries no chain lines at all (seed or re-seed with scripts/refill-log-chain.cjs)"
+    ).toBeGreaterThan(0);
+    // The file must END with a chain line: both appenders chain their own
+    // writes, so an unchained tail after the last chain line is itself a
+    // tamper signal, not outside-the-chain silence.
+    const lastChain = logLines.map((l) => chainLineRe.test(l)).lastIndexOf(true);
+    expect(lastChain, "the log carries at least one chain line").toBeGreaterThan(-1);
+    expect(
+      logLines
+        .slice(lastChain + 1)
+        .join("\n")
+        .trim(),
+      "the log ends with unchained content after its last chain line — appends must be chained by the drill itself or scripts/append-drill-log.cjs (CI); unchained bytes are tamper evidence"
+    ).toBe("");
 
     // Closed line vocabulary: the log may contain only the line kinds the
     // drill and the CI append produce. A foreign line — appended tail text,
@@ -1296,6 +1313,64 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 6, 8, 9, 10)", 
       foreign,
       `GUARDS-LOG.md contains line(s) no drill or CI append produces: ${foreign.map((l) => JSON.stringify(l.slice(0, 80))).join(" | ") || "none"} — the log is append-only drill output (drift class 8)`
     ).toEqual([]);
+  });
+
+  it("drift class 8: the chain digest algorithm is pinned identically in the drill writer, the CI appender, the refill, and this lint", () => {
+    // The chain's guarantees hold only while all four implementations hash
+    // the same bytes with the same algorithm. Each is pinned by STRUCTURAL
+    // markers with exact occurrence counts over comment-stripped source —
+    // comments are not evidence. The markers are fragment-composed below so
+    // this pin's own source never spells a complete atom: the lint's
+    // self-counts stay 1 (its real hashing site), never 2.
+    const read = (p: string) => stripLineComments(fs.readFileSync(path.join(repoRoot, p), "utf8"));
+    const count = (src: string, needle: string) => src.split(needle).length - 1;
+    const M = (a: string, b: string) => a + b;
+
+    const sha256Call = M("createHash(", '"sha256")');
+    const digestHex = M('digest("he', 'x")');
+    const normalizeAtom = M("replace(/\\r\\n/g, ", '"\\n")');
+    const drillBoundary = M("withEntry = normalized + ", "entry");
+    const drillUpdate = M("update(with", "Entry");
+    const ciBoundary = M("normalized + lines.", 'join("\\n") + "\\n"');
+    const ciUpdate = M("update(with", "Lines");
+    const lintReplay = M("update(logLines.slice(0, i).", 'join("\\n") + "\\n"');
+    const refillVerify = M("update(lines.slice(0, i).", 'join("\\n") + "\\n"');
+    const refillBuilder = M("update(out.", 'join("\\n") + "\\n"');
+    const refillHelper = M("digest", "Of");
+
+    const drill = read(path.join("scripts", "drill-abi-contract.cjs"));
+    const appender = read(path.join("scripts", "append-drill-log.cjs"));
+    const refill = read(path.join("scripts", "refill-log-chain.cjs"));
+
+    // The drill writer: exactly one hashing site, boundary = file + entry,
+    // LF-normalized — the boundary bug an end-to-end run once caught.
+    expect(count(drill, sha256Call), "drill writer: exactly one sha256 site").toBe(1);
+    expect(count(drill, drillBoundary), "drill writer: digest boundary is file + entry").toBe(1);
+    expect(count(drill, drillUpdate), "drill writer: hashes the file+entry buffer").toBe(1);
+    expect(count(drill, normalizeAtom), "drill writer: LF-normalizes before hashing").toBe(1);
+    expect(count(drill, digestHex), "drill writer: hex digest").toBe(1);
+
+    // The CI appender: one hashing site, boundary = file + CI lines.
+    expect(count(appender, sha256Call), "CI appender: exactly one sha256 site").toBe(1);
+    expect(count(appender, ciBoundary), "CI appender: digest boundary is file + summary lines").toBe(1);
+    expect(count(appender, ciUpdate), "CI appender: hashes the file+lines buffer").toBe(1);
+    expect(count(appender, normalizeAtom), "CI appender: LF-normalizes before hashing").toBe(1);
+    expect(count(appender, digestHex), "CI appender: hex digest").toBe(1);
+
+    // The refill: two sites (its verifier replay + its segment builder),
+    // plus the shared digestOf helper both route through.
+    expect(count(refill, sha256Call), "refill: verifier + builder sha256 sites").toBe(2);
+    expect(count(refill, refillVerify), "refill: verifier replays the line-prefix boundary").toBe(1);
+    expect(count(refill, refillBuilder), "refill: builder hashes the rebuilt prefix").toBe(1);
+    expect(count(refill, refillHelper), "refill: digestOf helper appears in builder + call").toBe(2);
+    expect(count(refill, normalizeAtom), "refill: LF-normalizes before hashing").toBe(1);
+    expect(count(refill, digestHex), "refill: hex digests").toBe(2);
+
+    // This lint's own replay: exactly one hashing site with the line-prefix
+    // boundary — the reference implementation the writers must match.
+    expect(count(lintCode, sha256Call), "lint: exactly one sha256 site").toBe(1);
+    expect(count(lintCode, lintReplay), "lint: replay boundary is the line prefix + LF").toBe(1);
+    expect(count(lintCode, normalizeAtom), "lint: LF-normalizes the log before replay").toBe(1);
   });
 
   it("drift class 8: every CI summary line in GUARDS-LOG.md is well-formed", () => {

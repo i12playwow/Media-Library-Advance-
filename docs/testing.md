@@ -108,16 +108,24 @@ the exit-0-only-if-green branch, and the untouched unit-ready path.
 
 Every local `npm run drill:abi` appends a per-leg entry (10 rows, metadata
 line with versions/commit/platform/duration); scheduled CI appends one summary
-line per OS instead. The log is committed after each local drill, and
+line per OS instead, and `.github/workflows/drill.yml`'s append job commits
+them chained into the log's hash chain through `scripts/append-drill-log.cjs`.
+The log is committed after each local drill, and
 `docsSearchRefs.test.ts` (drift class 8) keeps it parseable: the latest entry must match the drill's
 leg catalog, and every CI line must be well-formed. The history is also
-tamper-evident: every entry ends with a `- chain:` line — the sha256 of every
-byte before it plus the running entry count — so a historical entry cannot be
-silently edited or dropped; any such edit breaks every later chain line, and
-drift class 8 verifies the chain on every `npm test`. After a *legitimate*
+tamper-evident: the log is a sequence of chained segments — every drill entry
+and every absorbed CI batch ends with a `- chain:` line — the sha256 of every
+byte before it plus the running entry count — so a historical entry or CI
+verdict cannot be silently edited or dropped; any such edit breaks every later
+chain line, the file must always end with a chain line, and drift class 8
+verifies all of it on every `npm test`. After a *legitimate*
 rewrite of the log, `node scripts/refill-log-chain.cjs` re-seeds the whole
 chain (verifying itself before writing) — a visible re-commit, never a silent
-one.
+one. The digest algorithm itself is pinned: drift class 8 checks, by
+structural markers with exact occurrence counts, that the drill writer, the
+CI appender, the refill, and the lint's replay all hash the same bytes the
+same way (one sha256 site each, the same file+appended-bytes boundary, the
+same LF normalization).
 
 ## Fixing a red machine
 
