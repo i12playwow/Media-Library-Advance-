@@ -30,13 +30,26 @@ interface TmdbConfigurationResponse {
   };
 }
 
+interface ItunesSearchResponse {
+  results: Array<{
+    trackName: string;
+    artworkUrl100?: string;
+    releaseDate?: string;
+  }>;
+}
+
 export interface OnlineMovieMetadata {
   actresses: string[];
   modelName: string | null;
   posterUrl: string | null;
-  source: "javdatabase" | "tmdb";
+  source: MetadataSourceKind;
   videoId: string | null;
 }
+
+// The strategy vocabulary resolveMetadataStrategyOrder walks, cheapest and
+// most-specific first by design: video-ID databases (keyless) before
+// title-based sources, and TMDB last behind its non-commercial gate.
+export type MetadataSourceKind = "javdatabase" | "javbus" | "itunes" | "tmdb";
 
 let tmdbPosterBaseUrlCache = "";
 let tmdbPosterBaseUrlCacheKey = "";
@@ -355,6 +368,14 @@ export async function fetchOnlineMovieMetadataByVideoId(
     if (metadata) {
       return metadata;
     }
+
+    // Second keyless ID site: javdatabase misses are not final. Same
+    // og:image contract, cached under the same candidate key.
+    const javbusMetadata = await fetchJavBusMetadata(candidate);
+    onlineMovieMetadataCache.set(cacheKey, javbusMetadata);
+    if (javbusMetadata) {
+      return javbusMetadata;
+    }
   }
 
   return null;
@@ -382,6 +403,16 @@ export async function resolveOnlineMovieMetadata(
       if (javMetadata) {
         onlineMovieMetadataCache.set(cacheKey, javMetadata);
         return javMetadata;
+      }
+    }
+
+    // Keyless title-based source: fills the no-video-ID gap that previously
+    // fell straight through to TMDB (or to nothing, with TMDB gated off).
+    if (strategy === "itunes") {
+      const itunesMetadata = await fetchItunesMovieMetadata(movie, settings, options);
+      if (itunesMetadata) {
+        onlineMovieMetadataCache.set(cacheKey, itunesMetadata);
+        return itunesMetadata;
       }
     }
 
@@ -429,20 +460,20 @@ export async function enrichActressPhotos(
 function resolveMetadataStrategyOrder(
   profile: MetadataSourceProfile,
   hasVideoId: boolean
-): Array<"javdatabase" | "tmdb"> {
+): MetadataSourceKind[] {
   if (profile === "local-only") {
     return [];
   }
 
   if (profile === "mainstream-first") {
-    return hasVideoId ? ["tmdb", "javdatabase"] : ["tmdb"];
+    return hasVideoId ? ["itunes", "tmdb", "javdatabase"] : ["itunes", "tmdb"];
   }
 
   if (hasVideoId) {
-    return ["javdatabase", "tmdb"];
+    return ["javdatabase", "itunes", "tmdb"];
   }
 
-  return ["tmdb"];
+  return ["itunes", "tmdb"];
 }
 
 function buildMetadataCacheKey(
@@ -484,6 +515,117 @@ async function fetchActressPhotoFromJavDatabase(name: string): Promise<string | 
   // Fallback: look for idol image pattern
   const imgMatch = html.match(/<img[^>]+class="[^"]*idol[^"]*"[^>]+src="([^"]+)"/i);
   return imgMatch?.[1] ?? null;
+}
+
+// Second keyless video-ID site (javdatabase misses are not final). Same
+// og:image contract; errors are swallowed as a miss so a blocked or
+// rate-limited site degrades to "no result" instead of aborting the chain.
+async function fetchJavBusMetadata(videoId: string): Promise<OnlineMovieMetadata | null> {
+  const slug = videoId.toLowerCase();
+  try {
+    const response = await fetch(`https://www.javbus.com/${slug}/`, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const html = await response.text();
+    const posterMatch = html.match(/property="og:image"\s+content="([^"]+)"/i);
+    return {
+      actresses: [],
+      modelName: videoId.split("-")[0] ?? null,
+      posterUrl: posterMatch?.[1] ?? null,
+      source: "javbus",
+      videoId
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Keyless title-based source (Apple's public iTunes Search API): fills the
+// no-video-ID gap. A result is accepted only when its title or release year
+// agrees with the movie — the API fuzzy-matches, and an unrelated cover is
+// worse than no poster.
+async function fetchItunesMovieMetadata(
+  movie: Pick<MovieRecord, "title" | "year" | "sourcePath" | "videoId">,
+  settings: MetadataSettings,
+  options?: {
+    onProgress?: (progress: ScanProgress) => void;
+    progress?: ScanProgress;
+  }
+): Promise<OnlineMovieMetadata | null> {
+  if (!movie.title.trim()) {
+    return null;
+  }
+
+  options?.onProgress?.({
+    ...(options.progress ?? createFallbackProgress(movie.sourcePath)),
+    message: `Fetching keyless title poster for ${movie.title}`
+  });
+
+  const params = new URLSearchParams({
+    term: movie.title,
+    media: "movie",
+    entity: "movie",
+    limit: "25",
+    country: settings.region || "US"
+  });
+
+  let payload: ItunesSearchResponse;
+  try {
+    const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    payload = (await response.json()) as ItunesSearchResponse;
+  } catch {
+    return null;
+  }
+
+  const candidates = payload.results.filter((result) => result.artworkUrl100);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const movieTitle = normalize(movie.title);
+  let best: { result: (typeof candidates)[number]; score: number } | null = null;
+  for (const result of candidates) {
+    const candidateTitle = normalize(result.trackName);
+    let score = 0;
+    if (candidateTitle === movieTitle) {
+      score += 1000;
+    }
+    if (movieTitle && (candidateTitle.includes(movieTitle) || movieTitle.includes(candidateTitle))) {
+      score += 250;
+    }
+    const releaseYear = Number((result.releaseDate ?? "").slice(0, 4));
+    if (movie.year && releaseYear === movie.year) {
+      score += 400;
+    }
+    if (!best || score > best.score) {
+      best = { result, score };
+    }
+  }
+
+  if (!best || best.score <= 0) {
+    return null;
+  }
+
+  return {
+    actresses: [],
+    modelName: null,
+    // artworkUrl100 is the small variant; the same asset exists at 600x600.
+    posterUrl: best.result.artworkUrl100!.replace("/100x100", "/600x600"),
+    source: "itunes",
+    videoId: movie.videoId ?? null
+  };
 }
 
 async function fetchJavDatabaseMetadata(
