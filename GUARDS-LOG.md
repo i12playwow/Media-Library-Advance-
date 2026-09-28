@@ -16,6 +16,20 @@ dropping, or reordering any historical byte breaks every chain line after the
 edit. After a *legitimate* rewrite, re-seed the whole chain with
 `node scripts/refill-log-chain.cjs` and commit it — visibly, never silently.
 
+How the writer broke, and how the pins grew: commit b5eda7e introduced the
+chain and hashed the right boundary (file + entry, LF-normalized) but then
+appended the hashed WHOLE instead of the entry — `appendFileSync(GUARDS_LOG,
+withEntry + …)` — duplicating the log on every run. No structural pin saw it:
+drift class 8 pinned the boundary expression, not the append argument, and the
+writer ran only in drills, never between b5eda7e and the first real run ~5.5h
+later. Two drill runs caught it; the fix appends only the new bytes and derives
+the entry count from the same hashed buffer. The class-8 write-path pins grew
+from that lesson — exactly one append site writing only `entry`, exactly one
+entry-count site reading the hashed buffer, no writeFileSync, no truncate — and
+carry to the CI appender, the refill, and now the drill's behavioral tamper leg
+(`scripts/tamper-probe.cjs`), which proves the UNVERIFIED half the structure
+cannot: one byte flipped, the real app must serve the unverified FAILURE.
+
 ## 2026-09-26T04:49:27.968Z — contract holds (10/10 legs)
 
 - node v26.8.1 · better-sqlite3 12.11.1 · electron 41.1.1 · commit 1b86b34 · win32 · 7s
@@ -32,14 +46,14 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 2ea316605d3b34e6caf80d4852203fbaed17ea9c2d3d34035f28dd7ba051bde6 · entries 1
+- chain: a43167445b1784f1438dfa234cda75e32bee99b447d78d0c0d4187089a278637 · entries 1
 - 2026-09-26T07:18:12.129Z · ci · macos-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226288058 · drill@d1a1882
 - 2026-09-26T07:18:12.346Z · ci · ubuntu-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226288058 · drill@d1a1882
 - 2026-09-26T07:18:12.346Z · ci · windows-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226288058 · drill@d1a1882
 - 2026-09-26T07:30:21.761Z · ci · macos-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226883408 · drill@0eb031e
 - 2026-09-26T07:30:21.764Z · ci · ubuntu-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226883408 · drill@0eb031e
 - 2026-09-26T07:30:21.764Z · ci · windows-latest · contract holds (10/10 legs) · run https://github.com/Creative-hub554/medialibrary-plus/actions/runs/36226883408 · drill@0eb031e
-- chain: 7c7ad098e0978de8d9409ae2c6bcf58e7a53d3c20c86ee42bc494f8f05d9788e · entries 1
+- chain: 6fcbef194ba7fdcc279e10c97b39c8ae948c76812b2e3de606b65230fd979e27 · entries 1
 
 ## 2026-09-26T11:29:41.148Z — contract holds (10/10 legs)
 
@@ -57,7 +71,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 4b47164f2e6a0f279da2ad30abd39006cb23b2d3871131bdc6d578d57bd5753b · entries 2
+- chain: 39680f08675b1da2f2f93a2bd7e30281c92f925db480d7b88e86ba1b0457ddc8 · entries 2
 
 ## 2026-09-26T18:53:35.944Z — contract holds (10/10 legs)
 
@@ -75,7 +89,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: f998f5757b08ea1bb9b55dbc9db7bc0da49988b16963a5d95f2d9d1da24d9a95 · entries 3
+- chain: 8622d6232f26c4b3b49bc276cedbf7a9d338f30084b4dbff09d2fec02a259411 · entries 3
 
 ## 2026-09-27T00:27:28.794Z — contract BROKEN (9/10 legs)
 
@@ -93,7 +107,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ❌ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 73b258b55f02073791834b182378f76f21f0f675a86081a35a26a0a04b79627c · entries 4
+- chain: a4dbe58568eada1cf2f6d1c513cb3be215677245ee6ef8217696a049caa646b4 · entries 4
 
 ## 2026-09-27T00:29:35.375Z — contract BROKEN (9/10 legs)
 
@@ -111,7 +125,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ❌ | restore | rebuild-node failed (exit 1) |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 2beaa5ea9227dd3dbccabce12659a96736af5f74d475bebb59f005cc78f81638 · entries 5
+- chain: 1efbf3a2d1333f304d2793698ac287271b8e5ca15591c60b5947fe56c693eea3 · entries 5
 
 ## 2026-09-27T00:31:59.869Z — contract holds (10/10 legs)
 
@@ -129,7 +143,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 004dc9a3d433d4fea56e926a67740caa5c5d7f0518e764fcfd9fd5e318a5ab49 · entries 6
+- chain: 380181f39b7aed7ee652b1cd3c95390ca6f0ce72d856627401c31a2e287a35ce · entries 6
 
 ## 2026-09-27T12:45:46.665Z — contract holds (10/10 legs)
 
@@ -147,7 +161,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 5e3a98e22441ae7fab7de75d50191b74b605393edde4056617987d2d1d6dbd4a · entries 7
+- chain: 5c4d1e31549f55ab6f25e4c0ede3e75c50b7e225a57ef4826d6b6dbc38e8bb4e · entries 7
 
 ## 2026-09-27T17:35:20.857Z — contract holds (10/10 legs)
 
@@ -165,7 +179,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: 597a00a13f2f7721e8d0a85c1ccfe69e46e54118e6122c29d0b6a38afb617b46 · entries 8
+- chain: e5dc3259022f80d5b9a9cbfd6dc2bbf658eca1e8fac0a8f72b5cea193538d9c1 · entries 8
 
 ## 2026-09-27T19:20:52.341Z — contract holds (10/10 legs)
 
@@ -183,7 +197,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: ff47b39be4bf8b9c2439b14bc8a8a76113f0c2731101352bcf7d2ca4e856a8da · entries 9
+- chain: a33c457feec879146bc4e34f2f3245ee3e576f3d9cadd25f812c35e1b11336b9 · entries 9
 
 ## 2026-09-28T01:03:46.265Z — contract holds (10/10 legs)
 
@@ -201,7 +215,7 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: b1246ff08a61fcb12fd38c5de74c73e71b7c13d0812b87ca9c3b54b17532b571 · entries 10
+- chain: 7a49009ed030caca2a2cafad740c07fa581e8517c5cd41d7fdf398b332339acb · entries 10
 
 ## 2026-09-28T01:21:53.807Z — contract holds (10/10 legs)
 
@@ -219,4 +233,4 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
-- chain: c00e4dd799732dbb784d4c6fcf9a28928bcd350d519f7fd3fceaf1ddaec3774e · entries 11
+- chain: 5b65b810fca524be51930d4f0669b0ab9e586f7ac5bd82d04cdd784140e3ea17 · entries 11
