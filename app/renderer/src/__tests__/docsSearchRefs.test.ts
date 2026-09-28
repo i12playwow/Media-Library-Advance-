@@ -1440,6 +1440,11 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
 
     const drillAppend = M("appendFileSync(GUARDS_LOG, ", "entry");
     const drillCount = M("withEntry.match(", "/^## /gm)");
+    const ciAppend = M("appendFileSync(LOG, ", "lines.");
+    const ciCount = M("withLines.match(", "/^## /gm)");
+    const appendSite = "appendFileSync(";
+    const writeFileSite = "writeFileSync(";
+    const truncateSite = "truncateSync";
     // The drill writer: exactly one hashing site, boundary = file + entry,
     // LF-normalized — the boundary bug an end-to-end run once caught.
     expect(count(drill, sha256Call), "drill writer: exactly one sha256 site").toBe(1);
@@ -1454,6 +1459,8 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // count is derived from the same hashed buffer.
     expect(count(drill, drillAppend), "drill writer: appends only the new bytes, never the hashed whole").toBe(1);
     expect(count(drill, drillCount), "drill writer: entry count comes from the hashed buffer").toBe(1);
+    expect(count(drill, appendSite), "drill writer: exactly one write site, and it appends").toBe(1);
+    expect(count(drill, writeFileSite), "drill writer: never rewrites the log").toBe(0);
 
     // The CI appender: one hashing site, boundary = file + CI lines.
     expect(count(appender, sha256Call), "CI appender: exactly one sha256 site").toBe(1);
@@ -1461,6 +1468,20 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(count(appender, ciUpdate), "CI appender: hashes the file+lines buffer").toBe(1);
     expect(count(appender, normalizeAtom), "CI appender: LF-normalizes before hashing").toBe(1);
     expect(count(appender, digestHex), "CI appender: hex digest").toBe(1);
+    // Write-path pins — the class the drill's duplication bug lived in. The
+    // appender APPENDS: exactly one write site, only the new CI lines plus
+    // their chain line (never the hashed whole), entry count from the hashed
+    // buffer, and the malformed-line validation runs BEFORE any write —
+    // a bad payload exits before the log is touched.
+    expect(count(appender, ciAppend), "CI appender: appends only the new lines, never the hashed whole").toBe(1);
+    expect(count(appender, ciCount), "CI appender: entry count comes from the hashed buffer").toBe(1);
+    expect(count(appender, appendSite), "CI appender: exactly one write site, and it appends").toBe(1);
+    expect(count(appender, writeFileSite), "CI appender: never rewrites the log").toBe(0);
+    expect(count(appender, truncateSite), "CI appender: never truncates the log").toBe(0);
+    expect(
+      appender.indexOf(appendSite) > appender.indexOf("malformed CI summary line"),
+      "CI appender: validates the payload before touching the log"
+    ).toBe(true);
 
     // The refill: two sites (its verifier replay + its segment builder),
     // plus the shared digestOf helper both route through.
@@ -1470,6 +1491,26 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(count(refill, refillHelper), "refill: digestOf helper appears in builder + call").toBe(2);
     expect(count(refill, normalizeAtom), "refill: LF-normalizes before hashing").toBe(1);
     expect(count(refill, digestHex), "refill: hex digests").toBe(2);
+    // The refill's write-path contract is the opposite shape: it REWRITES
+    // the whole file — it IS the legitimate-rewrite remedy — so exactly one
+    // rewrite site, never an append (a refill append would double-chain
+    // every segment), the rebuilt buffer is what gets written, and the
+    // write is gated behind its own verification and the idempotence check.
+    expect(count(refill, writeFileSite), "refill: exactly one rewrite site").toBe(1);
+    expect(count(refill, appendSite), "refill: never appends (that would double-chain)").toBe(0);
+    expect(count(refill, truncateSite), "refill: never truncates (it rewrites atomically)").toBe(0);
+    expect(
+      count(refill, M("writeFileSync(LOG, ", "result")),
+      "refill: writes the rebuilt, verified buffer"
+    ).toBe(1);
+    expect(
+      refill.indexOf("const verdict = verify(out)") < refill.indexOf(writeFileSite),
+      "refill: self-verifies before any write"
+    ).toBe(true);
+    expect(
+      refill.indexOf("result === raw") < refill.indexOf(writeFileSite),
+      "refill: the idempotence gate precedes the write"
+    ).toBe(true);
 
     // This lint's own replay: exactly one hashing site with the line-prefix
     // boundary — the reference implementation the writers must match.
