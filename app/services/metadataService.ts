@@ -34,6 +34,7 @@ interface TmdbConfigurationResponse {
 interface ImdbSuggestionResponse {
   d: Array<{
     l: string;
+    id?: string;
     y?: number;
     qid?: string;
     i?: { imageUrl?: string };
@@ -51,6 +52,15 @@ export interface OnlineMovieMetadata {
 let tmdbPosterBaseUrlCache = "";
 let tmdbPosterBaseUrlCacheKey = "";
 const onlineMovieMetadataCache = new Map<string, OnlineMovieMetadata | null>();
+
+// Actress-photo misses are marked in-memory only: persisting a marker row
+// would leak into the photo-gallery readers, and re-fetching a 404 on a
+// later run is cheap.
+const actressPhotoMisses = new Set<string>();
+
+export function isKnownActressPhotoMiss(name: string): boolean {
+  return actressPhotoMisses.has(name.trim().toLowerCase());
+}
 
 export async function enrichMoviePoster(
   database: DatabaseClient,
@@ -437,15 +447,35 @@ export async function enrichActressPhotos(
   for (const actress of actresses) {
     if (!actress.trim()) continue;
     if (database.getActressPhoto(actress)) continue; // already cached
+    if (actressPhotoMisses.has(actress.trim().toLowerCase())) continue;
     try {
-      const photoUrl = await fetchActressPhotoFromJavDatabase(actress);
+      const photoUrl = await fetchActressPhotoKeyless(actress);
       if (photoUrl) {
         database.setActressPhoto(actress, photoUrl);
+      } else {
+        actressPhotoMisses.add(actress.trim().toLowerCase());
       }
     } catch {
       // silently skip — photo fetch is best-effort
     }
   }
+}
+
+// Keyless actress-photo chain, mirroring the movie chain's shape:
+// javdatabase idol pages, then javbus star pages, then IMDb person
+// suggestions — every stop keyless, and a miss at one is not final.
+async function fetchActressPhotoKeyless(name: string): Promise<string | null> {
+  const javdatabasePhoto = await fetchActressPhotoFromJavDatabase(name);
+  if (javdatabasePhoto) {
+    return javdatabasePhoto;
+  }
+
+  const javbusPhoto = await fetchActressPhotoFromJavBus(name);
+  if (javbusPhoto) {
+    return javbusPhoto;
+  }
+
+  return fetchActressPhotoFromImdb(name);
 }
 
 function resolveMetadataStrategyOrder(
@@ -484,6 +514,86 @@ function buildMetadataCacheKey(
     movie.year ?? "",
     path.resolve(movie.sourcePath).toLowerCase()
   ].join("|");
+}
+
+// Second keyless actress site: javbus star pages (/star/<name>/). Errors
+// degrade to a miss so a blocked site cannot abort the chain, and any page
+// that smells like an age-verification interstitial is a miss too — its
+// only images are logos, which must never be stored as a headshot.
+async function fetchActressPhotoFromJavBus(name: string): Promise<string | null> {
+  const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  try {
+    const response = await fetch(`https://www.javbus.com/star/${slug}/`, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const html = await response.text();
+    if (/Age Verification/i.test(html)) {
+      return null;
+    }
+    const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i);
+    if (ogMatch?.[1]) {
+      return ogMatch[1];
+    }
+    const photoFrame = html.match(/<img[^>]+class="[^"]*photo-frame[^"]*"[^>]+src="([^"]+)"/i);
+    return photoFrame?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Third keyless actress site: IMDb person suggestions (nm-prefixed IDs).
+// The endpoint fuzzy-matches, so a candidate is accepted only when the name
+// agrees — an exact normalized match, or a containment match in the same
+// family-name direction. A filmography headshot of the WRONG person is
+// worse than no photo.
+async function fetchActressPhotoFromImdb(name: string): Promise<string | null> {
+  const term = name.trim().toLowerCase();
+  if (!term) {
+    return null;
+  }
+  try {
+    const response = await fetch(
+      `https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(term)}.json`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as ImdbSuggestionResponse;
+    const normalizedName = normalize(name);
+    const candidates = payload.d.filter(
+      (entry) =>
+        typeof entry.id === "string" &&
+        entry.id.startsWith("nm") &&
+        entry.i?.imageUrl
+    );
+    for (const candidate of candidates) {
+      const candidateName = normalize(candidate.l);
+      if (candidateName === normalizedName) {
+        return candidate.i!.imageUrl!;
+      }
+      const [givenName, ...familyRest] = name.trim().toLowerCase().split(/\s+/);
+      const familyName = familyRest[familyRest.length - 1];
+      if (
+        givenName &&
+        familyName &&
+        candidate.l.toLowerCase().includes(givenName) &&
+        candidate.l.toLowerCase().includes(familyName)
+      ) {
+        return candidate.i!.imageUrl!;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchActressPhotoFromJavDatabase(name: string): Promise<string | null> {

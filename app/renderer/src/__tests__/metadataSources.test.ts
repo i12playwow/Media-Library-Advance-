@@ -269,3 +269,110 @@ describe("keyless poster sources", () => {
     expect(metadata?.source).toBe("imdb");
   });
 });
+
+describe("keyless actress photos", () => {
+  interface FakeDatabase {
+    stored: Map<string, string>;
+    getActressPhoto: (name: string) => string | null;
+    setActressPhoto: (name: string, photoUrl: string) => void;
+  }
+
+  function makeDatabase(): FakeDatabase {
+    const stored = new Map<string, string>();
+    return {
+      stored,
+      getActressPhoto: (name) => stored.get(name) ?? null,
+      setActressPhoto: (name, photoUrl) => {
+        stored.set(name, photoUrl);
+      }
+    };
+  }
+
+  function fakeClient(db: FakeDatabase): Parameters<typeof metadataService.enrichActressPhotos>[0] {
+    return db as unknown as Parameters<typeof metadataService.enrichActressPhotos>[0];
+  }
+
+  it("falls back through javbus (age-wall refused) to IMDb person suggestions", async () => {
+    const db = makeDatabase();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("javdatabase.com/idols/")) {
+        return httpResponse(404, "");
+      }
+      if (url.includes("javbus.com/star/")) {
+        return httpResponse(
+          200,
+          "<html><title>Age Verification JavBus - JavBus</title><img src=\"logo.png\"></html>"
+        );
+      }
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
+        return jsonResponse({
+          d: [
+            { l: "Saori Hara", id: "nm11931621", i: { imageUrl: "https://m.media-amazon.com/images/saori.jpg" } }
+          ]
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await metadataService.enrichActressPhotos(fakeClient(db), ["Saori Hara"]);
+
+    expect(db.stored.get("Saori Hara")).toBe("https://m.media-amazon.com/images/saori.jpg");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("javbus.com/star/saori-hara/"))).toBe(true);
+  });
+
+  it("stops at javdatabase when the idol page serves a photo", async () => {
+    const db = makeDatabase();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("javdatabase.com/idols/")) {
+        return httpResponse(
+          200,
+          "<html><meta property=\"og:image\" content=\"https://pics.example/idol.jpg\"></html>"
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await metadataService.enrichActressPhotos(fakeClient(db), ["Tsukasa Aoi"]);
+
+    expect(db.stored.get("Tsukasa Aoi")).toBe("https://pics.example/idol.jpg");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("javbus.com"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("media-imdb.com"))).toBe(false);
+  });
+
+  it("refuses a wrong IMDb person instead of storing an unrelated headshot", async () => {
+    const db = makeDatabase();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("javdatabase.com/idols/") || url.includes("javbus.com/star/")) {
+        return httpResponse(404, "");
+      }
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
+        return jsonResponse({
+          d: [
+            { l: "Miyavi Matsunoi", id: "nm3390465", i: { imageUrl: "https://m.media-amazon.com/images/wrong.jpg" } }
+          ]
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await metadataService.enrichActressPhotos(fakeClient(db), ["Saori Hara"]);
+
+    expect(db.stored.size).toBe(0);
+    expect(metadataService.isKnownActressPhotoMiss("saori hara")).toBe(true);
+  });
+
+  it("marks misses in memory so the same name is not re-fetched this session", async () => {
+    const db = makeDatabase();
+    fetchMock.mockImplementation(async () => httpResponse(404, ""));
+
+    await metadataService.enrichActressPhotos(fakeClient(db), ["Nobody Real"]);
+    const callsAfterFirst = fetchMock.mock.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    await metadataService.enrichActressPhotos(fakeClient(db), ["Nobody Real"]);
+    expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
+  });
+});
