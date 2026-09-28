@@ -14,7 +14,7 @@ silently rot. Each catches a different class of drift, at a different time:
 |---|---|---|---|
 | 1. Static drift tests | `app/renderer/src/__tests__/docsSearchRefs.test.ts` | Every `npm test` (locally and in CI's unit job) | Docs that cite things that no longer exist — and package.json/ci.yml/database.ts changes that contradict what the docs promise |
 | 2. CI-structure checks | `.github/workflows/ci.yml` (the `pretest` gate in the unit job, the direct `verify:abi:electron` in the e2e job) | Unit and typecheck on every push and PR; the e2e job nightly (plus manual dispatch) and on demand for PRs via the `run-e2e` label (pr-e2e.yml) | A broken or wrong-ABI native binding — before vitest or Playwright spend any time |
-| 3. Behavioral drill | `scripts/drill-abi-contract.cjs` via `npm run drill:abi`; scheduled weekly in `.github/workflows/drill.yml` | On demand (~2 min), plus weekly on Windows, Ubuntu, and macOS clean checkouts; local runs append a per-leg history entry, and scheduled CI runs append one summary line per OS, to `GUARDS-LOG.md` | Behavior regressions the static layers cannot see: a gate that stops aborting, a hook that silently repairs the binding, `diagnose:abi -- --fix` claiming success falsely |
+| 3. Behavioral drill | `scripts/drill-abi-contract.cjs` via `npm run drill:abi`; scheduled weekly in `.github/workflows/drill.yml` | On demand (~2 min), plus weekly on Windows, Ubuntu, and macOS clean checkouts (the Linux job adds the `scripts/tamper-probe.cjs` tamper leg); local runs append a per-leg history entry, and scheduled CI runs append one summary line per OS, to `GUARDS-LOG.md` | Behavior regressions the static layers cannot see: a gate that stops aborting, a hook that silently repairs the binding, `diagnose:abi -- --fix` claiming success falsely, a tampered `GUARDS-LOG.md` that stops turning the Settings card unverified |
 
 **Layer 1 — the doc-drift lint.** The deep-dives under `docs/` are
 linted, not just written: every path, filename, identifier, anchor, and npm
@@ -49,11 +49,15 @@ better-sqlite3 binding between ABIs and proves the contract *by runs*: the
 gate must abort with the binding untouched (mtime-checked), `pretest:e2e`
 must heal the identical state, and `diagnose:abi -- --fix` must restore
 Node-ABI on demand — then it restores your machine in a `finally` block,
-even when a leg fails.
+even when a leg fails. On CI's Linux runner the weekly drill applies the
+same idea to the guards log: `scripts/tamper-probe.cjs` (via
+`npm run probe:tamper`) tampers one byte of the committed `GUARDS-LOG.md`
+and requires the real app to serve the tamper as an unverified FAILURE —
+the probe's `finally` block restores the log byte-exactly.
 
 ### The scripts behind the dance
 
-The six files under `scripts/` implement the contract; [docs/testing.md](docs/testing.md)
+The seven files under `scripts/` implement the contract; [docs/testing.md](docs/testing.md)
 specifies it in full:
 
 - `scripts/lib/abi-state.cjs` — shared helpers: the **rule-1 FTS5 proof**
@@ -75,6 +79,10 @@ specifies it in full:
   afterwards (`FIX OK`, binding-rewritten proof).
 - `scripts/drill-abi-contract.cjs` — the 8 contract legs + R1–R2 restore,
   with a `finally`-guarded restore and the `GUARDS-LOG.md` append.
+- `scripts/tamper-probe.cjs` — the CI drill's behavioral tamper leg (driven
+  by `npm run probe:tamper`): tampers one byte of the committed log, runs
+  the guards-chain e2e spec, accepts only a genuinely-run green verdict,
+  and restores the log byte-exactly in its own `finally` block.
 
 One implementation constraint is contractual because Windows enforces it:
 **a successful load maps `better_sqlite3.node` into the loading process, and a

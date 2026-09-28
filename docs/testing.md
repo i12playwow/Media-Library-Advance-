@@ -108,7 +108,9 @@ the exit-0-only-if-green branch, and the untouched unit-ready path.
 
 Every local `npm run drill:abi` appends a per-leg entry (10 rows, metadata
 line with versions/commit/platform/duration); scheduled CI appends one summary
-line per OS instead, and `.github/workflows/drill.yml`'s append job commits
+line per OS instead — the Linux one carrying the drill's behavioral tamper
+verdict as an optional `· tamper holds|BROKEN` clause — and
+`.github/workflows/drill.yml`'s append job commits
 them chained into the log's hash chain through `scripts/append-drill-log.cjs`.
 The log is committed after each local drill, and
 `docsSearchRefs.test.ts` (drift class 8) keeps it parseable: the latest entry must match the drill's
@@ -195,6 +197,24 @@ Discord-compatible message (repo, event, commit, run link) to the URL in
 the CI_ALERT_WEBHOOK repository secret, retrying once; with the secret
 unset the step skips quietly, so forks and unconfigured repos get no
 noise.
+
+The scheduled drill (`.github/workflows/drill.yml`, weekly, plus manual
+dispatch) carries the same contract one step further than the nightly e2e
+job: alongside the structural ABI drill on all three OSes, its Linux job
+adds a behavioral tamper leg — **Run the tamper probe** flips one byte of
+the committed `GUARDS-LOG.md`'s first drill entry, runs the guards-chain e2e
+spec against the real app, and requires that tamper to surface as the
+mandatory unverified FAILURE through the real preload bridge. The leg is
+Linux-only because it launches Electron under xvfb and the drill leaves the
+binding Node-ABI, so the probe heals its own ABI in the `pretest:e2e` order
+(rule 3); rule 5 is why it is not part of the local drill. The verdict is
+accepted only from Playwright's own output — a green suite without the
+single passed test is a red leg — and it is recorded in history like any
+other: the Linux summary line gains a `tamper holds|BROKEN` clause, holds
+only when the probe's egress marker proves the leg passed, and the appender
+refuses to append a line it cannot parse. The probe restores the log
+byte-exactly in its own `finally` block, so a red leg never leaves a
+tampered log behind.
 
 Downloads are cached: **Cache Electron binary and Playwright browsers**
 keys `~/.cache/electron` and `~/.cache/ms-playwright` on the lockfile hash,

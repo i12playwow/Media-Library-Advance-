@@ -7,6 +7,18 @@ name: Drill
 # the log's tamper-evident hash chain exactly like local drill entries, so
 # CI verdicts are tamper-evident history too (drift class 8).
 #
+# On Linux the drill job additionally runs the behavioral tamper leg
+# (npm run probe:tamper → scripts/tamper-probe.cjs): it tampers one byte of
+# GUARDS-LOG.md's first drill entry, runs the guards-chain e2e spec, and
+# requires the real app to serve the tamper as an unverified FAILURE through
+# the real preload bridge — the UNVERIFIED half of the chain contract, which
+# no structural pin can see. The leg is Linux-only because it launches
+# Electron (xvfb) and the drill leaves the binding Node-ABI, so the probe
+# heals its own ABI in the pretest:e2e order (rule 3). Its verdict rides in
+# the OS summary line as a `tamper holds|BROKEN` clause: holds only when the
+# probe's own egress marker proves the leg passed, BROKEN when it failed or
+# never ran — never a fabricated holds.
+#
 # The append job needs contents: write to push GUARDS-LOG.md; the drill jobs
 # stay read-only. The log is append-only with distinct timestamped lines, so
 # appends never conflict; a raced push is retried by re-running the appender
@@ -49,6 +61,18 @@ jobs:
           set +e
           npm run drill:abi 2>&1 | tee drill-output.txt
           exit ${PIPESTATUS[0]}
+      # The behavioral tamper leg: Electron + xvfb live on Linux, and the
+      # drill leaves the binding Node-ABI, so the probe heals its own ABI
+      # (the pretest:e2e order) before launching the app. It streams its own
+      # progress; the egress marker its stdout ends with on success is what
+      # the summary step greps for below.
+      - name: Run the tamper probe
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set +e
+          npm run probe:tamper 2>&1 | tee tamper-output.txt
+          exit ${PIPESTATUS[0]}
       - name: Record CI summary
         if: always()
         shell: bash
@@ -58,10 +82,21 @@ jobs:
             "contract holds ("*|*"contract holds (10/10 legs)"*) ;;
             *) verdict="contract BROKEN (0/10 legs) — drill did not complete" ;;
           esac
+          # The tamper clause exists only on the OS that runs the leg, and
+          # never claims holds without the probe's egress marker proving it.
+          tamper=""
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            if [ -f tamper-output.txt ] && grep -q "^tamper-probe: leg PASSED" tamper-output.txt; then
+              tamper=" · tamper holds"
+            else
+              tamper=" · tamper BROKEN"
+              echo "tamper verdict marker missing — recording the leg as BROKEN" >&2
+            fi
+          fi
           ts="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           run="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          printf -- "- %s · ci · %s · %s · run %s · drill@%s\n" \
-            "$ts" "${{ matrix.os }}" "$verdict" "$run" "${GITHUB_SHA::7}" \
+          printf -- "- %s · ci · %s · %s%s · run %s · drill@%s\n" \
+            "$ts" "${{ matrix.os }}" "$verdict" "$tamper" "$run" "${GITHUB_SHA::7}" \
             > drill-summary-${{ matrix.os }}.txt
           cat "drill-summary-${{ matrix.os }}.txt"
       - name: Upload the summary line

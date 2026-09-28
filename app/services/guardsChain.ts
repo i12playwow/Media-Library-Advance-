@@ -13,8 +13,10 @@ export const LINE_END = "\n";
 export const CHAIN_LINE_TAIL = /- chain: ([0-9a-f]{64}) · entries (\d+)$/;
 const LAST_RUN_HEAD = /^## (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) — contract (holds|BROKEN)/;
 // CI summary line shape (mirrors append-drill-log.cjs's CI_LINE_RE; classifies
-// segment items for the Settings breakdown).
-const CI_LINE = /^- (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) · ci · [a-z-]+ · contract (holds|BROKEN) \(\d+\/10 legs\) · run \S+ · drill@[0-9a-f]+$/;
+// segment items for the Settings breakdown). The optional `· tamper
+// holds|BROKEN` clause rides only on lines from the OS that runs drill.yml's
+// behavioral tamper leg (scripts/tamper-probe.cjs).
+const CI_LINE = /^- (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) · ci · [a-z-]+ · contract (holds|BROKEN) \(\d+\/10 legs\)(?: · tamper (?:holds|BROKEN))? · run \S+ · drill@[0-9a-f]+$/;
 // Sole LF-normalization site: both readers route through this helper, keeping
 // the lint's structural pin (exactly one normalize atom) true.
 const toLf = (raw: string): string => raw.replace(/\r\n/g, "\n");

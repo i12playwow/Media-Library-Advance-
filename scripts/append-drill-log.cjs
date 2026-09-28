@@ -6,7 +6,15 @@
 // the drill writer chains its own entries:
 //
 //   - 2026-09-27T...Z · ci · <os> · contract holds (10/10 legs) · run <url> · drill@<sha>
+//   - 2026-09-27T...Z · ci · ubuntu-latest · contract holds (10/10 legs) · tamper holds · run <url> · drill@<sha>
 //   - chain: <sha256-of-all-bytes-before-this-line> · entries <count>
+//
+// The optional `· tamper holds|BROKEN` clause rides only on lines from the
+// OS that runs drill.yml's behavioral tamper leg (Linux): scripts/
+// tamper-probe.cjs tampers GUARDS-LOG.md itself and requires the real app
+// to serve the tamper as an unverified FAILURE. Its verdict is history like
+// any other: tamper holds proves the unverified path was exercised and
+// green that week; tamper BROKEN is a red leg recorded as such.
 //
 // The chain line digests every byte before it — pre-log plus the new CI
 // lines — LF-normalized, matching drift class 8's replay in
@@ -23,7 +31,7 @@ const path = require("node:path");
 
 const LOG = path.join(__dirname, "..", "GUARDS-LOG.md");
 // Identical line contract to the one drift class 8 enforces.
-const CI_LINE_RE = /^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z · ci · [a-z-]+ · contract (?:holds|BROKEN) \(\d+\/10 legs\) · run \S+ · drill@[0-9a-f]+$/;
+const CI_LINE_RE = /^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z · ci · [a-z-]+ · contract (?:holds|BROKEN) \(\d+\/10 legs\)(?: · tamper (?:holds|BROKEN))? · run \S+ · drill@[0-9a-f]+$/;
 const CHAIN_LINE_RE = /^- chain: [0-9a-f]{64} · entries \d+$/;
 const normalize = (s) => s.replace(/\r\n/g, "\n");
 

@@ -1005,9 +1005,16 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // doc → code: every `npm run` the workflow invokes is a real, wired
     // package.json script whose body matches its claim.
     const runTargets = [...drillWorkflowSource.matchAll(/npm run ([a-z:.-]+)/g)].map((m) => m[1]);
-    expect([...new Set(runTargets)], "the workflow's npm-run appetite is exactly this set").toEqual(["drill:abi"]);
+    // Sorted: the appetite is a set; comments may mention scripts in any order.
+    expect([...new Set(runTargets)].sort(), "the workflow's npm-run appetite is exactly this set").toEqual(["drill:abi", "probe:tamper"]);
     expect(scripts["drill:abi"], "drill:abi drives the contract drill").toBe("node scripts/drill-abi-contract.cjs");
     expect(fs.existsSync(path.join(repoRoot, "scripts", "drill-abi-contract.cjs")), "the drill script exists").toBe(true);
+    // The behavioral tamper leg rides the same appetite: the workflow drives
+    // the probe through its script, whose pre-hook is the pure Node gate
+    // (rule 3's asymmetry, mirrored at the probe's own scale).
+    expect(scripts["probe:tamper"], "probe:tamper drives the tamper probe").toBe("node scripts/tamper-probe.cjs");
+    expect(scripts["preprobe:tamper"], "preprobe:tamper is the pure gate").toBe("npm run verify:abi");
+    expect(fs.existsSync(path.join(repoRoot, "scripts", "tamper-probe.cjs")), "the tamper probe script exists").toBe(true);
 
     // The appender: exists, referenced exactly twice — the append and the
     // bounded race-retry re-append (no force-push; the loop is the remedy).
@@ -1544,7 +1551,7 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       expect(
         line,
         `CI line format: ${line.slice(0, 80)}`
-      ).toMatch(/^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z · ci · [a-z-]+ · contract holds \(10\/10 legs\) · run \S+ · drill@[0-9a-f]+$/);
+      ).toMatch(/^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z · ci · [a-z-]+ · contract holds \(10\/10 legs\)(?: · tamper (?:holds|BROKEN))? · run \S+ · drill@[0-9a-f]+$/);
     }
   });
 
@@ -1603,6 +1610,54 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // ...and the finally still restores (rebuilds) the machine.
     const finallyBlock = drillSource.slice(finallyAt);
     expect(finallyBlock, "the finally block rebuilds for Node").toContain("rebuild:node");
+  });
+
+  it("drift class 9: the CI tamper leg is wired, egress-gated, and restores the log", () => {
+    // The workflow runs the probe on Linux only, after the structural
+    // drill, and feeds the summary step from the file it tees (the verdict
+    // clause itself is pinned by the class-8 CI-line format above).
+    expect(drillWorkflowSource, "the probe step is Linux-only").toContain(
+      "if: ${{ !cancelled() && runner.os == 'Linux' }}"
+    );
+    // Order comes from the parsed steps, not raw indexOf — the workflow's
+    // header comment legitimately names scripts before any step runs.
+    const drillStepNames = drillWorkflowJobs.drill.steps.map((s) => s.name);
+    expect(drillStepNames, "the drill job's named steps").toEqual([
+      "Check out the repository",
+      "Set up Node",
+      "Install dependencies",
+      "Run the drill",
+      "Run the tamper probe",
+      "Record CI summary",
+      "Upload the summary line",
+    ]);
+    expect(
+      drillStepNames.indexOf("Run the tamper probe"),
+      "the probe runs after the structural drill"
+    ).toBeGreaterThan(drillStepNames.indexOf("Run the drill"));
+
+    const probe = stripLineComments(fs.readFileSync(path.join(repoRoot, "scripts", "tamper-probe.cjs"), "utf8"));
+    const occurrences = (src: string, needle: string) => src.split(needle).length - 1;
+    // The tamper itself: one canary byte-flip of the committed log's first
+    // drill entry, proven to have taken before anything depends on it.
+    expect(occurrences(probe, "rebuild-node oK"), "the probe flips exactly one canary byte").toBe(1);
+    expect(occurrences(probe, "rebuild-node ok"), "the canary's untampered spelling appears once").toBe(1);
+    expect(probe, "the tamper is proven to have taken").toContain("if (tampered === original)");
+    // The verdict is behavioral: the spec must pass (its app under test
+    // reports the tamper as an unverified FAILURE), accepted only from
+    // Playwright's own output — a silent green without the pass line is a
+    // red leg. The egress marker is what drill.yml's summary step greps.
+    expect(
+      occurrences(probe, "passes[0] === 1 && specStatus === 0"),
+      "green requires the pass line and exit 0 together, exactly once"
+    ).toBe(1);
+    expect(occurrences(probe, "tamper-probe: leg PASSED"), "the egress marker exists exactly once").toBe(1);
+    // Restoration is unconditional and verified: the finally block rewrites
+    // the snapshot and compares it back — a botched restore is a red exit.
+    const probeFinallyAt = probe.indexOf("} finally {");
+    const restoreAt = probe.indexOf("fs.writeFileSync(LOG, original");
+    expect(restoreAt, "the restore happens in the finally block").toBeGreaterThan(probeFinallyAt);
+    expect(probe, "the restore is verified byte-exact").toContain("restored !== original");
   });
 
   it("drift class 9, rule 6: diagnose --fix heals via rebuild, gates its exit, and leaves a unit-ready binding untouched", () => {

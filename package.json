@@ -14,6 +14,8 @@
     "verify:abi:electron": "node scripts/abi-check.cjs --electron",
     "diagnose:abi": "node scripts/diagnose-abi.cjs",
     "drill:abi": "node scripts/drill-abi-contract.cjs",
+    "probe:tamper": "node scripts/tamper-probe.cjs",
+    "preprobe:tamper": "npm run verify:abi",
     "pretest": "npm run verify:abi",
     "test": "vitest run",
     "pretest:e2e": "npm run rebuild:electron && npm run verify:abi:electron",
