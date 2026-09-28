@@ -201,7 +201,9 @@ noise.
 The scheduled drill (`.github/workflows/drill.yml`, weekly, plus manual
 dispatch) carries the same contract one step further than the nightly e2e
 job: alongside the structural ABI drill on all three OSes, its Linux job
-adds a behavioral tamper leg — **Run the tamper probe** flips one byte of
+adds a behavioral tamper leg — **Install Electron system dependencies**
+provisions the Chromium libraries and linker-cache proof exactly like the
+e2e job, then **Run the tamper probe** flips one byte of
 the committed `GUARDS-LOG.md`'s first drill entry, runs the guards-chain e2e
 spec against the real app, and requires that tamper to surface as the
 mandatory unverified FAILURE through the real preload bridge. The leg is

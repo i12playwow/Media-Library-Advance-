@@ -65,13 +65,34 @@ jobs:
       # drill leaves the binding Node-ABI, so the probe heals its own ABI
       # (the pretest:e2e order) before launching the app. It streams its own
       # progress; the egress marker its stdout ends with on success is what
-      # the summary step greps for below.
+      # the summary step greps for below. Same system-library gate as ci.yml's
+      # e2e job: a headless Linux runner has neither the Chromium libs Electron
+      # links against nor a display server — a red leg here would be a
+      # preventable crash recorded as history, not a contract break.
+      - name: Install Electron system dependencies
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: |
+          ok=0
+          for attempt in 1 2 3; do
+            if npx playwright install-deps chromium; then ok=1; break; fi
+            echo "playwright install-deps attempt $attempt failed; retrying in 15s"
+            sleep 15
+          done
+          if [ "$ok" = 0 ]; then
+            echo "playwright install-deps failed after 3 attempts" >&2
+            exit 1
+          fi
+          if ! ldconfig -p 2>/dev/null | grep -q "libnss3.so"; then
+            echo "libnss3.so missing from the linker cache; install-deps was a silent no-op" >&2
+            exit 1
+          fi
+          echo "Electron system libraries verified in the linker cache"
       - name: Run the tamper probe
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         shell: bash
         run: |
           set +e
-          npm run probe:tamper 2>&1 | tee tamper-output.txt
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" npm run probe:tamper 2>&1 | tee tamper-output.txt
           exit ${PIPESTATUS[0]}
       - name: Record CI summary
         if: always()
