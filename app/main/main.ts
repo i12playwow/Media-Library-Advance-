@@ -9,7 +9,7 @@ import { moveMovieToMode } from "../services/fileService";
 import { buildTargetSubtitlePath } from "../services/libraryLayout";
 import { DEFAULT_SCAN_OPTIONS, scanLibraries, createCancelToken, registerLocalFiles, type CancelToken } from "../services/libraryScanner";
 import { extractSubtitleLanguage } from "../services/libraryScanner";
-import { readGuardsChainState } from "../services/guardsChain";
+import { readGuardsChainState, readGuardsChainSegments } from "../services/guardsChain";
 import { SUBTITLE_EXTENSIONS } from "../shared/contracts";
 import { enrichMoviePoster } from "../services/metadataService";
 import { runFfmpeg } from "../services/ffmpegService";
@@ -855,6 +855,10 @@ function registerHandlers(): void {
   // tamper-evident chain at read time through the same replay the doc-drift
   // lint performs, so the GUI shows the state npm test would compute.
   ipcMain.handle("guards:getChainState", async () => readGuardsChainState());
+
+  // Per-segment breakdown of the same verified replay — null when the chain
+  // is broken, so the GUI can never render an unverified history.
+  ipcMain.handle("guards:listSegments", async () => readGuardsChainSegments());
 
   ipcMain.handle("settings:saveMetadata", async (_event, settings: MetadataSettings) => {
     database.setMetadataSettings(settings);

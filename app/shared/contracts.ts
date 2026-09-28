@@ -284,3 +284,20 @@ export interface GuardsChainState {
   lastRun: string | null;
   verifiedAt: string;
 }
+
+// Per-segment breakdown of the chained log (guards:listSegments): each
+// segment is a drill entry or an absorbed CI batch, ending in a chain line
+// whose digest covers every byte before it.
+export interface GuardsChainSegmentItem {
+  kind: "entry" | "ci";
+  timestamp: string;
+  verdict: "holds" | "BROKEN";
+  digestPrefix: string;
+}
+
+export interface GuardsChainSegment {
+  kind: "entry" | "ci-batch";
+  items: GuardsChainSegmentItem[];
+  digest: string;
+  entriesAtChain: number;
+}

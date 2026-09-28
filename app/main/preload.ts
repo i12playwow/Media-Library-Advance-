@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppShellState,
   ConvertVideoResult,
+  GuardsChainSegment,
   GuardsChainState,
   MetadataSettings,
   LibraryMode,
@@ -40,6 +41,8 @@ const api = {
     ipcRenderer.invoke("app:getState"),
   getGuardsChainState: (): Promise<GuardsChainState> =>
     ipcRenderer.invoke("guards:getChainState"),
+  listGuardsChainSegments: (): Promise<GuardsChainSegment[] | null> =>
+    ipcRenderer.invoke("guards:listSegments"),
   saveMetadataSettings: (settings: MetadataSettings): Promise<AppShellState> =>
     ipcRenderer.invoke("settings:saveMetadata", settings),
   saveOrganizationSettings: (settings: OrganizationSettings): Promise<AppShellState> =>

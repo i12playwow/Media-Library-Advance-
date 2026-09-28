@@ -42,16 +42,16 @@ this table):
 | `player:*` | playback | `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4` |
 | `subtitle:*` | subtitle generation and local subtitle directories | `subtitle:addDir`, `subtitle:removeDir`, `subtitle:scan`, `subtitle:generateForMovie`, `subtitle:getModelAvailability`, `subtitle:downloadModel`, `subtitle:previewOutput`, `subtitle:modelDownloadProgress` (push) |
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
-| `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState` |
+| `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-13 prefixes, 55 invoke channels (one `ipcMain.handle` each, all in main.ts),
+13 prefixes, 56 invoke channels (one `ipcMain.handle` each, all in main.ts),
 3 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
 `onSubtitleModelDownloadProgress`).
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 54 invoke channels has a
+- **Every named channel is real.** Each of the 56 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`

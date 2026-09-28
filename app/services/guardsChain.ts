@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import type { GuardsChainState } from "../shared/contracts";
+import type { GuardsChainSegment, GuardsChainState } from "../shared/contracts";
 
 // Mirrors drift class 8's replay in docsSearchRefs.test.ts: the log is a
 // sequence of chained segments (drill entries and absorbed CI batches), each
@@ -12,6 +12,12 @@ const LOG_PATH = path.join(__dirname, "..", "..", "GUARDS-LOG.md");
 export const LINE_END = "\n";
 export const CHAIN_LINE_TAIL = /- chain: ([0-9a-f]{64}) · entries (\d+)$/;
 const LAST_RUN_HEAD = /^## (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) — contract (holds|BROKEN)/;
+// CI summary line shape (mirrors append-drill-log.cjs's CI_LINE_RE; classifies
+// segment items for the Settings breakdown).
+const CI_LINE = /^- (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) · ci · [a-z-]+ · contract (holds|BROKEN) \(\d+\/10 legs\) · run \S+ · drill@[0-9a-f]+$/;
+// Sole LF-normalization site: both readers route through this helper, keeping
+// the lint's structural pin (exactly one normalize atom) true.
+const toLf = (raw: string): string => raw.replace(/\r\n/g, "\n");
 
 export function readGuardsChainState(now: Date = new Date()): GuardsChainState {
   let raw: string;
@@ -31,7 +37,7 @@ export function readGuardsChainState(now: Date = new Date()): GuardsChainState {
 }
 
 export function verifyChainLog(raw: string, now: Date = new Date()): GuardsChainState {
-  const logLines = raw.replace(/\r\n/g, "\n").split("\n");
+  const logLines = toLf(raw).split("\n");
   const chainLines: Array<{ index: number; digest: string; entries: number }> = [];
   for (let i = 0; i < logLines.length; i++) {
     const match = CHAIN_LINE_TAIL.exec(logLines[i]);
@@ -99,4 +105,63 @@ export function verifyChainLog(raw: string, now: Date = new Date()): GuardsChain
     lastRun,
     verifiedAt: now.toISOString()
   };
+}
+
+// Per-segment extraction for the Settings breakdown (guards:listSegments).
+// Gated on a full verified replay of the SAME bytes — a tampered or
+// unchained log yields null, never a partial breakdown — then classifies
+// each segment from its items: `## ` heads are drill entries, CI-summary
+// lines are absorbed batches. No hashing here: verifyChainLog already
+// proved every digest on this input, keeping the file at exactly one
+// sha256 site (the lint pins it).
+export function extractChainSegments(raw: string): GuardsChainSegment[] | null {
+  if (!verifyChainLog(raw).ok) return null;
+  const logLines = toLf(raw).split("\n");
+  const chainLines: Array<{ index: number; digest: string; entries: number }> = [];
+  for (let i = 0; i < logLines.length; i++) {
+    const match = CHAIN_LINE_TAIL.exec(logLines[i]);
+    if (match) chainLines.push({ index: i, digest: match[1], entries: Number(match[2]) });
+  }
+  const segments: GuardsChainSegment[] = [];
+  let pending: GuardsChainSegment | null = null;
+  let nextChain = 0;
+  for (let i = 0; i < logLines.length; i++) {
+    const claimed = chainLines[nextChain];
+    if (claimed && claimed.index === i) {
+      if (pending) {
+        pending.digest = claimed.digest;
+        pending.entriesAtChain = claimed.entries;
+        segments.push(pending);
+        pending = null;
+      }
+      nextChain++;
+      continue;
+    }
+    const head = LAST_RUN_HEAD.exec(logLines[i]);
+    if (head) {
+      if (!pending) pending = { kind: "entry", items: [], digest: "", entriesAtChain: 0 };
+      pending.kind = "entry";
+      pending.items.push({ kind: "entry", timestamp: head[1], verdict: head[2] as "holds" | "BROKEN", digestPrefix: "" });
+      continue;
+    }
+    const ci = CI_LINE.exec(logLines[i]);
+    if (ci) {
+      if (!pending) pending = { kind: "ci-batch", items: [], digest: "", entriesAtChain: 0 };
+      pending.kind = "ci-batch";
+      pending.items.push({ kind: "ci", timestamp: ci[1], verdict: ci[2] as "holds" | "BROKEN", digestPrefix: "" });
+    }
+  }
+  if (nextChain !== chainLines.length) return null;
+  for (const segment of segments) {
+    for (const item of segment.items) item.digestPrefix = segment.digest.slice(0, 12);
+  }
+  return segments;
+}
+
+export function readGuardsChainSegments(): GuardsChainSegment[] | null {
+  try {
+    return extractChainSegments(fs.readFileSync(LOG_PATH, "utf8"));
+  } catch {
+    return null;
+  }
 }

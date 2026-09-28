@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import React from "react";
-import { describe, expect, it } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { verifyChainLog } from "../../../services/guardsChain";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { verifyChainLog, extractChainSegments } from "../../../services/guardsChain";
 import { GuardsChainCard, GuardsChainSection } from "../components/GuardsChainCard";
 
 // ── chain replay over fixture texts (no disk fixtures; digests computed) ───
@@ -55,11 +57,20 @@ const ENTRY_B = {
   entries: 1
 };
 
+const CI_BATCH_BROKEN = {
+  body: [
+    "- 2026-09-28T04:30:00.000Z · ci · macos-latest · contract BROKEN (3/10 legs) · run https://example.invalid/r/2 · drill@7202896"
+  ],
+  entries: 0
+};
+
+const THREE = [ENTRY_A, CI_BATCH, ENTRY_B];
+
 describe("guardsChain service", () => {
   const now = new Date("2026-09-28T05:00:00.000Z");
 
   it("verifies a healthy chained log (entries + CI batches), reporting tip and last run", () => {
-    const state = verifyChainLog(chainedLog([ENTRY_A, CI_BATCH, ENTRY_B]), now);
+    const state = verifyChainLog(chainedLog(THREE), now);
     expect(state.ok).toBe(true);
     expect(state.segments).toBe(3);
     expect(state.entries).toBe(2);
@@ -69,7 +80,7 @@ describe("guardsChain service", () => {
   });
 
   it("fails and reports the claimed tip when a historical byte is tampered with", () => {
-    const log = chainedLog([ENTRY_A, CI_BATCH, ENTRY_B]).replace("rebuild-node ok", "rebuild-node oK");
+    const log = chainedLog(THREE).replace("rebuild-node ok", "rebuild-node oK");
     const state = verifyChainLog(log, now);
     expect(state.ok).toBe(false);
     expect(state.segments).toBe(1); // segment 1 verified, broke entering segment 2
@@ -93,10 +104,67 @@ describe("guardsChain service", () => {
 
   it("fails when a chain line's entry count disagrees with the headers seen", () => {
     const log = chainedLog([ENTRY_A]).replace("· entries 1", "· entries 2");
-    const state = verifyChainLog(log, now);
-    expect(state.ok).toBe(false);
+    expect(verifyChainLog(log, now).ok).toBe(false);
+  });
+
+  it("extracts per-segment kinds, timestamps, verdicts, and digest prefixes", () => {
+    const segments = extractChainSegments(chainedLog([...THREE, CI_BATCH_BROKEN]));
+    expect(segments).not.toBeNull();
+    expect(segments!.map((s) => s.kind)).toEqual(["entry", "ci-batch", "entry", "ci-batch"]);
+    expect(segments![0].items).toEqual([
+      {
+        kind: "entry",
+        timestamp: "2026-09-27T17:35:20.857Z",
+        verdict: "holds",
+        digestPrefix: segments![0].digest.slice(0, 12)
+      }
+    ]);
+    expect(segments![1].items.map((i) => i.kind)).toEqual(["ci", "ci"]);
+    expect(segments![1].items[0].timestamp).toBe("2026-09-28T03:17:00.000Z");
+    expect(segments![2].entriesAtChain).toBe(2);
+    expect(segments![3].items[0].verdict).toBe("BROKEN");
+    for (const segment of segments!) {
+      expect(segment.digest).toMatch(/^[0-9a-f]{64}$/);
+      for (const item of segment.items) expect(item.digestPrefix).toMatch(/^[0-9a-f]{12}$/);
+    }
+  });
+
+  it("refuses to break down a tampered log", () => {
+    const log = chainedLog(THREE).replace("rebuild-node ok", "rebuild-node oK");
+    expect(extractChainSegments(log)).toBeNull();
+  });
+
+  it("extracts segments from the committed GUARDS-LOG.md — the same bytes the GUI reads", () => {
+    const logPath = path.resolve(__dirname, "..", "..", "..", "..", "GUARDS-LOG.md");
+    const raw = fs.readFileSync(logPath, "utf8");
+    const segments = extractChainSegments(raw);
+    expect(segments, "the committed log verifies and parses").not.toBeNull();
+    expect(segments!.length).toBeGreaterThanOrEqual(10);
+    const entrySegments = segments!.filter((s) => s.kind === "entry");
+    expect(entrySegments.length).toBe(9);
+    expect(entrySegments[0].items[0].timestamp).toBe("2026-09-26T04:49:27.968Z");
+    expect(segments![segments!.length - 1].digest).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+const SEGMENTS_STUB = [
+  {
+    kind: "entry" as const,
+    items: [
+      { kind: "entry" as const, timestamp: "2026-09-27T17:35:20.857Z", verdict: "holds" as const, digestPrefix: "aaaaaaaaaaaa" }
+    ],
+    digest: "a".repeat(64),
+    entriesAtChain: 1
+  },
+  {
+    kind: "ci-batch" as const,
+    items: [
+      { kind: "ci" as const, timestamp: "2026-09-28T03:17:00.000Z", verdict: "holds" as const, digestPrefix: "bbbbbbbbbbbb" }
+    ],
+    digest: "b".repeat(64),
+    entriesAtChain: 1
+  }
+];
 
 describe("GuardsChainCard + GuardsChainSection", () => {
   it("renders a healthy chain state with tip digest and last run", () => {
@@ -119,6 +187,44 @@ describe("GuardsChainCard + GuardsChainSection", () => {
     expect(screen.getByText(/2026-09-27T17:35:20.857Z — contract holds/)).toBeInTheDocument();
   });
 
+  it("renders a per-segment breakdown with timestamps, verdicts, and digest prefixes", () => {
+    const digestA = "d".repeat(64);
+    const digestB = "e".repeat(64);
+    render(
+      <GuardsChainCard
+        state={{
+          ok: true,
+          segments: 2,
+          entries: 1,
+          tipDigest: digestB,
+          lastRun: null,
+          verifiedAt: "2026-09-28T05:00:00.000Z"
+        }}
+        segments={[
+          {
+            kind: "entry",
+            items: [{ kind: "entry", timestamp: "2026-09-27T17:35:20.857Z", verdict: "holds", digestPrefix: digestA.slice(0, 12) }],
+            digest: digestA,
+            entriesAtChain: 1
+          },
+          {
+            kind: "ci-batch",
+            items: [{ kind: "ci", timestamp: "2026-09-28T03:17:00.000Z", verdict: "BROKEN", digestPrefix: digestB.slice(0, 12) }],
+            digest: digestB,
+            entriesAtChain: 1
+          }
+        ]}
+      />
+    );
+    expect(screen.getByText(/drill entry/)).toBeInTheDocument();
+    expect(screen.getByText(/ci batch/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-09-27T17:35:20.857Z/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-09-28T03:17:00.000Z/)).toBeInTheDocument();
+    expect(screen.getByText(/BROKEN/)).toBeInTheDocument();
+    // The full digest rides the title attribute for hover inspection.
+    expect(screen.getByTitle(digestA)).toBeInTheDocument();
+  });
+
   it("renders the failure state loudly", () => {
     render(
       <GuardsChainCard
@@ -136,8 +242,9 @@ describe("GuardsChainCard + GuardsChainSection", () => {
     expect(screen.getByText(/Verifying the guards log/)).toBeInTheDocument();
   });
 
-  it("the section fetches over IPC, renders, and re-verifies on demand", async () => {
+  it("the section fetches both channels over IPC, renders, and re-verifies on demand", async () => {
     let calls = 0;
+    let segCalls = 0;
     (window as unknown as { desktopApi: unknown }).desktopApi = {
       getGuardsChainState: async () => {
         calls++;
@@ -149,14 +256,72 @@ describe("GuardsChainCard + GuardsChainSection", () => {
           lastRun: "2026-09-28T04:00:00.000Z — contract holds",
           verifiedAt: "2026-09-28T05:00:00.000Z"
         };
+      },
+      listGuardsChainSegments: async () => {
+        segCalls++;
+        return SEGMENTS_STUB;
       }
     };
 
     render(<GuardsChainSection />);
     await waitFor(() => expect(screen.getByText("verified")).toBeInTheDocument());
     expect(screen.getByText(/Chained segments: 3/)).toBeInTheDocument();
+    expect(screen.getByText(/ci batch/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Re-verify now/i }));
     await waitFor(() => expect(calls).toBe(2));
+    expect(segCalls).toBe(2);
+  });
+
+  it("re-verifies the chain every 30s while mounted, without a manual refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      let verdict = true;
+      (window as unknown as { desktopApi: unknown }).desktopApi = {
+        getGuardsChainState: async () => {
+          calls++;
+          return {
+            ok: verdict,
+            segments: 10,
+            entries: 9,
+            tipDigest: "c".repeat(64),
+            lastRun: "2026-09-27T17:35:20.857Z — contract holds",
+            verifiedAt: "2026-09-28T05:00:00.000Z"
+          };
+        },
+        listGuardsChainSegments: async () => []
+      };
+
+      render(<GuardsChainSection />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("verified")).toBeInTheDocument();
+      expect(calls).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(calls).toBe(2);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      verdict = false;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(29_999);
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+      });
+      expect(screen.getByText("FAILURE")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(calls).toBe(3); // 29_999 + 1 ticked a single 30s boundary
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
