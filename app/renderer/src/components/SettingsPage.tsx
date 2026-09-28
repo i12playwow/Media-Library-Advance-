@@ -257,10 +257,10 @@ export function SettingsPage({
             <p className="subtle">
               Auto keeps JAV-style ID lookups first (javdatabase, then javbus) when
               the app can detect one, then falls back to keyless title search via
-              the iTunes Search API. Mainstream-first prefers title search first,
-              while local-only skips all online metadata. TMDB needs both a read
-              token and the non-commercial checkbox — without them every poster
-              source stays keyless and TMDB is never contacted.
+              IMDb's public suggestion endpoint. Mainstream-first prefers title
+              search first, while local-only skips all online metadata. TMDB needs
+              both a read token and the non-commercial checkbox — without them
+              every poster source stays keyless and TMDB is never contacted.
             </p>
             <div className="inline-actions">
               <button
@@ -283,8 +283,8 @@ export function SettingsPage({
             TMDB is used only for the optional title-based fallback and is not endorsed
             or certified by TMDB. Use TMDB only for content that complies with their
             terms and attribution requirements. The other poster sources — local frame
-            capture, javdatabase, javbus, and the iTunes Search API — need no API key
-            and no token.
+            capture, javdatabase, javbus, and IMDb's public suggestion endpoint —
+            need no API key and no token.
           </p>
         </div>
 

@@ -114,19 +114,20 @@ describe("keyless poster sources", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 
-  it("auto profile falls through both ID sites to a keyless iTunes poster", async () => {
+  it("auto profile falls through both ID sites to a keyless IMDb poster", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("javdatabase.com") || url.includes("javbus.com")) {
         return httpResponse(404, "");
       }
-      if (url.startsWith("https://itunes.apple.com/search")) {
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
         return jsonResponse({
-          results: [
+          d: [
             {
-              trackName: "ABC-123 The Movie",
-              artworkUrl100: "https://is1.example/abc123/100x100bb.jpg",
-              releaseDate: "2020-01-01T00:00:00Z"
+              l: "ABC-123 The Movie",
+              y: 2020,
+              qid: "movie",
+              i: { imageUrl: "https://m.media-amazon.com/images/abc123full.jpg" }
             }
           ]
         });
@@ -139,20 +140,21 @@ describe("keyless poster sources", () => {
       makeSettings()
     );
 
-    expect(metadata?.source).toBe("itunes");
-    expect(metadata?.posterUrl).toBe("https://is1.example/abc123/600x600bb.jpg");
+    expect(metadata?.source).toBe("imdb");
+    expect(metadata?.posterUrl).toBe("https://m.media-amazon.com/images/abc123full.jpg");
   });
 
-  it("serves a keyless iTunes poster with no video ID and never touches TMDB", async () => {
+  it("serves a keyless IMDb poster with no video ID and never touches TMDB", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("https://itunes.apple.com/search")) {
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
         return jsonResponse({
-          results: [
+          d: [
             {
-              trackName: "Inception",
-              artworkUrl100: "https://is1.example/inception/100x100bb.jpg",
-              releaseDate: "2010-07-16T00:00:00Z"
+              l: "Inception",
+              y: 2010,
+              qid: "movie",
+              i: { imageUrl: "https://m.media-amazon.com/images/inception.jpg" }
             }
           ]
         });
@@ -165,27 +167,19 @@ describe("keyless poster sources", () => {
       makeSettings()
     );
 
-    expect(metadata?.source).toBe("itunes");
-    expect(metadata?.posterUrl).toBe("https://is1.example/inception/600x600bb.jpg");
+    expect(metadata?.source).toBe("imdb");
+    expect(metadata?.posterUrl).toBe("https://m.media-amazon.com/images/inception.jpg");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("themoviedb.org"))).toBe(false);
   });
 
-  it("prefers the year-matching iTunes candidate when titles tie", async () => {
+  it("prefers the year-matching IMDb candidate when titles tie", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("https://itunes.apple.com/search")) {
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
         return jsonResponse({
-          results: [
-            {
-              trackName: "Inception",
-              artworkUrl100: "https://is1.example/wrong/100x100bb.jpg",
-              releaseDate: "1999-03-05T00:00:00Z"
-            },
-            {
-              trackName: "Inception",
-              artworkUrl100: "https://is1.example/right/100x100bb.jpg",
-              releaseDate: "2010-07-16T00:00:00Z"
-            }
+          d: [
+            { l: "Inception", y: 1999, qid: "movie", i: { imageUrl: "https://m.media-amazon.com/images/wrong.jpg" } },
+            { l: "Inception", y: 2010, qid: "movie", i: { imageUrl: "https://m.media-amazon.com/images/right.jpg" } }
           ]
         });
       }
@@ -197,19 +191,42 @@ describe("keyless poster sources", () => {
       makeSettings()
     );
 
-    expect(metadata?.posterUrl).toBe("https://is1.example/right/600x600bb.jpg");
+    expect(metadata?.posterUrl).toBe("https://m.media-amazon.com/images/right.jpg");
   });
 
-  it("refuses an unrelated iTunes result instead of showing a wrong cover", async () => {
+  it("prefers the title-type candidate so a TV series never poses as the film", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("https://itunes.apple.com/search")) {
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
         return jsonResponse({
-          results: [
+          d: [
+            { l: "Inception", y: 2010, qid: "tvSeries", i: { imageUrl: "https://m.media-amazon.com/images/tv.jpg" } },
+            { l: "Inception", y: 2010, qid: "movie", i: { imageUrl: "https://m.media-amazon.com/images/film.jpg" } }
+          ]
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const metadata = await metadataService.resolveOnlineMovieMetadata(
+      { title: "Inception", year: 2010, sourcePath: "C:/lib/Inception/movie.mp4", videoId: null },
+      makeSettings()
+    );
+
+    expect(metadata?.posterUrl).toBe("https://m.media-amazon.com/images/film.jpg");
+  });
+
+  it("refuses an unrelated IMDb result instead of showing a wrong cover", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
+        return jsonResponse({
+          d: [
             {
-              trackName: "Completely Different Film",
-              artworkUrl100: "https://is1.example/wrong/100x100bb.jpg",
-              releaseDate: "1999-03-05T00:00:00Z"
+              l: "Completely Different Film",
+              y: 1999,
+              qid: "movie",
+              i: { imageUrl: "https://m.media-amazon.com/images/wrong.jpg" }
             }
           ]
         });
@@ -225,16 +242,17 @@ describe("keyless poster sources", () => {
     expect(metadata).toBeNull();
   });
 
-  it("mainstream-first tries keyless iTunes before even a token-enabled TMDB", async () => {
+  it("mainstream-first tries keyless IMDb before even a token-enabled TMDB", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("https://itunes.apple.com/search")) {
+      if (url.includes("v2.sg.media-imdb.com/suggestion")) {
         return jsonResponse({
-          results: [
+          d: [
             {
-              trackName: "Inception",
-              artworkUrl100: "https://is1.example/inception/100x100bb.jpg",
-              releaseDate: "2010-07-16T00:00:00Z"
+              l: "Inception",
+              y: 2010,
+              qid: "movie",
+              i: { imageUrl: "https://m.media-amazon.com/images/inception.jpg" }
             }
           ]
         });
@@ -248,6 +266,6 @@ describe("keyless poster sources", () => {
       makeSettings({ sourceProfile: "mainstream-first", tmdbNonCommercialUse: true, tmdbReadAccessToken: "token" })
     );
 
-    expect(metadata?.source).toBe("itunes");
+    expect(metadata?.source).toBe("imdb");
   });
 });
