@@ -92,6 +92,28 @@ describe("PosterVisual", () => {
     expect((container.firstChild as HTMLElement).className).toBe("poster-visual");
   });
 
+  it("badges the specific web source that served the poster", () => {
+    for (const [posterSource, badge] of [
+      ["javdatabase", "JDB"],
+      ["javbus", "JAVBUS"],
+      ["imdb", "IMDB"],
+      ["tmdb", "TMDB"],
+      ["web", "WEB"]
+    ] as const) {
+      const { unmount } = render(<PosterVisual movie={makeMovie({ posterSource })} />);
+      expect(screen.getByText(badge)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("shows no badge for local posters or missing posters", () => {
+    const local = render(<PosterVisual movie={makeMovie({ posterSource: "local", posterUrl: "data:image/jpeg;base64,x" })} />);
+    expect(local.container.querySelector(".poster-source-badge")).toBeNull();
+    local.unmount();
+    const none = render(<PosterVisual movie={makeMovie({ posterSource: "none", posterUrl: null })} />);
+    expect(none.container.querySelector(".poster-source-badge")).toBeNull();
+  });
+
   it("applies compact class", () => {
     const { container } = render(<PosterVisual movie={makeMovie()} compact />);
     expect((container.firstChild as HTMLElement).className).toBe("poster-visual compact");

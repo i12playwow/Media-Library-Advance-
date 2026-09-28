@@ -74,6 +74,7 @@ export const MovieTile = memo(MovieTileComponent, (prev, next) => {
     prev.movie.id === next.movie.id &&
     prev.movie.title === next.movie.title &&
     prev.movie.posterUrl === next.movie.posterUrl &&
+    prev.movie.posterSource === next.movie.posterSource &&
     prev.movie.year === next.movie.year &&
     prev.movie.resolution === next.movie.resolution &&
     prev.movie.libraryMode === next.movie.libraryMode &&

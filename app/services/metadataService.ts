@@ -4,6 +4,7 @@ import type { DatabaseClient } from "../database/database";
 import { probeVideoFile, runFfmpeg } from "./ffmpegService";
 import type {
   MetadataSettings,
+  MetadataSourceKind,
   MetadataSourceProfile,
   MovieRecord,
   ScanProgress
@@ -46,11 +47,6 @@ export interface OnlineMovieMetadata {
   source: MetadataSourceKind;
   videoId: string | null;
 }
-
-// The strategy vocabulary resolveMetadataStrategyOrder walks, cheapest and
-// most-specific first by design: video-ID databases (keyless) before
-// title-based sources, and TMDB last behind its non-commercial gate.
-export type MetadataSourceKind = "javdatabase" | "javbus" | "imdb" | "tmdb";
 
 let tmdbPosterBaseUrlCache = "";
 let tmdbPosterBaseUrlCacheKey = "";
@@ -99,13 +95,15 @@ export async function enrichMoviePoster(
     }
   }
 
-  const webPosterUrl = await fetchPosterUrlForMovie(movieWithResolvedId, settings, options);
-  if (!webPosterUrl) {
+  const webMetadata = await fetchPosterUrlForMovie(movieWithResolvedId, settings, options);
+  if (!webMetadata?.posterUrl) {
     return resolvedPosterUrl ?? null;
   }
 
-  database.updateMoviePoster(movieId, webPosterUrl, "web");
-  return webPosterUrl;
+  // Persist the SPECIFIC source so the UI can attribute the cover to the
+  // site that served it ("web" remains the legacy fallback).
+  database.updateMoviePoster(movieId, webMetadata.posterUrl, webMetadata.source ?? "web");
+  return webMetadata.posterUrl;
 }
 
 async function extractLocalPoster(
@@ -163,20 +161,12 @@ async function fetchPosterUrlForMovie(
     onProgress?: (progress: ScanProgress) => void;
     progress?: ScanProgress;
   }
-): Promise<string | null> {
+): Promise<OnlineMovieMetadata | null> {
   if (!settings.autoFetchWebPosters) {
     return null;
   }
 
-  if (!settings.tmdbNonCommercialUse) {
-    const videoId = resolveMovieVideoId(movie);
-    if (!videoId) {
-      return null;
-    }
-  }
-
-  const metadata = await resolveOnlineMovieMetadata(movie, settings, options);
-  return metadata?.posterUrl ?? null;
+  return resolveOnlineMovieMetadata(movie, settings, options);
 }
 
 async function searchTmdbMovie(

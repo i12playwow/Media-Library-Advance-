@@ -104,12 +104,18 @@ export interface MovieRecord {
   libraryMode: LibraryMode;
   resolution: string;
   posterUrl: string | null;
-  posterSource: "none" | "local" | "web";
+  posterSource: PosterSource;
   actresses: string[];
   keywords: string[];
   subtitles: SubtitleRecord[];
   updatedAt: string;
 }
+
+export type PosterSource = "none" | "local" | "web" | "javdatabase" | "javbus" | "imdb" | "tmdb";
+
+// The specific web sources behind a poster, persisted in poster_source so
+// the UI can attribute each cover to the site that served it.
+export type MetadataSourceKind = "javdatabase" | "javbus" | "imdb" | "tmdb";
 
 export interface LibraryRoots {
   normal: string[];

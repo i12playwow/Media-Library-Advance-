@@ -140,7 +140,7 @@ export async function moveMovieToMode(
     libraryMode: targetMode,
     resolution: movie.resolution,
     posterUrl: onlineMetadata?.posterUrl ?? movie.posterUrl,
-    posterSource: onlineMetadata?.posterUrl ? "web" : movie.posterSource,
+    posterSource: onlineMetadata?.posterUrl ? onlineMetadata.source : movie.posterSource,
     actresses,
     keywords: movie.keywords
   });

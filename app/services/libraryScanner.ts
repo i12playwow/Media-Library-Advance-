@@ -367,7 +367,7 @@ export async function scanLibraries(
           libraryMode: candidate.mode,
           resolution: candidate.parsed.resolution,
           posterUrl: onlineMetadata?.posterUrl ?? null,
-          posterSource: onlineMetadata?.posterUrl ? "web" : "none",
+          posterSource: onlineMetadata?.posterUrl ? onlineMetadata.source : "none",
           actresses,
           keywords: candidate.parsed.keywords
         });

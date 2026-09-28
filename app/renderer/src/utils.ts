@@ -184,7 +184,25 @@ export function getPosterSourceLabel(source: MovieRecord["posterSource"]): strin
   switch (source) {
     case "local": return "Local video frame";
     case "web": return "Web metadata";
+    case "javdatabase": return "javdatabase poster";
+    case "javbus": return "javbus poster";
+    case "imdb": return "IMDb poster";
+    case "tmdb": return "TMDB poster";
     default: return "No poster yet";
+  }
+}
+
+// Short attribution badges: which site served this movie's cover. The
+// legacy "web" (pre-attribution rows) renders as WEB.
+export function getPosterSourceBadge(source: string): string | null {
+  switch (source) {
+    case "javdatabase": return "JDB";
+    case "javbus": return "JAVBUS";
+    case "imdb": return "IMDB";
+    case "tmdb": return "TMDB";
+    case "web": return "WEB";
+    case "local": return null; // local frames are the app's own work — no badge
+    default: return null;
   }
 }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { MovieRecord, OnlineSubtitleResult, PlayerSettings } from "../../../shared/contracts";
 import type { } from "react";
-import { formatTime } from "../utils";
+import { formatTime, getPosterSourceBadge, getPosterSourceLabel } from "../utils";
 import { extractStrictJavVideoIdCandidates, extractVideoIdCandidates } from "../../../shared/videoId";
 import styles from './PlayerPage.module.css';
 
@@ -233,6 +233,14 @@ export function PlayerPage({
           <div className="player-now-playing-copy">
             <span className="player-pick-title">
               {playerMovie ? playerMovie.title : "No movie selected"}
+              {playerMovie && getPosterSourceBadge(playerMovie.posterSource) && (
+                <span
+                  className="poster-source-badge inline"
+                  title={`Poster: ${getPosterSourceLabel(playerMovie.posterSource)}`}
+                >
+                  {getPosterSourceBadge(playerMovie.posterSource)}
+                </span>
+              )}
             </span>
             {playerMovie ? (
               <span className="player-pick-subtitle">
@@ -301,7 +309,14 @@ export function PlayerPage({
                     type="button"
                   >
                     <div className="player-dropdown-info">
-                      <strong>{m.title}</strong>
+                      <strong>
+                        {m.title}
+                        {getPosterSourceBadge(m.posterSource) && (
+                          <span className="poster-source-badge inline" title={`Poster: ${getPosterSourceLabel(m.posterSource)}`}>
+                            {getPosterSourceBadge(m.posterSource)}
+                          </span>
+                        )}
+                      </strong>
                       <small>{m.videoId ?? m.libraryMode} · {m.year ?? "?"}</small>
                     </div>
                   </button>

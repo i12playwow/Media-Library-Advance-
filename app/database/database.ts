@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import type {
+  PosterSource,
   MetadataSettings,
   LibraryMode,
   LibraryRoots,
@@ -25,7 +26,7 @@ interface MovieRow {
   library_mode: LibraryMode;
   resolution: string;
   poster_url: string | null;
-  poster_source: "none" | "local" | "web";
+  poster_source: PosterSource;
   actresses_json: string;
   keywords_json: string;
   updated_at: string;
@@ -62,7 +63,7 @@ export interface MovieInput {
   libraryMode: LibraryMode;
   resolution: string;
   posterUrl?: string | null;
-  posterSource?: "none" | "local" | "web";
+  posterSource?: PosterSource;
   actresses: string[];
   keywords: string[];
 }
@@ -410,7 +411,7 @@ export class DatabaseClient {
   updateMoviePoster(
     id: string,
     posterUrl: string | null,
-    posterSource: "none" | "local" | "web"
+    posterSource: PosterSource
   ): void {
     this.db
       .prepare(

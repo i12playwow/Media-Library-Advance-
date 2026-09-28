@@ -808,6 +808,35 @@ code {
   backdrop-filter: blur(10px);
 }
 
+.poster-source-badge {
+  position: absolute;
+  bottom: 0.55rem;
+  right: 0.55rem;
+  z-index: 2;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(8, 10, 16, 0.78);
+  color: #cfd8e3;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+:root[data-theme="light"] .poster-source-badge {
+  background: rgba(255, 255, 255, 0.84);
+  color: #33404f;
+}
+
+/* Inline variant: inside the player's title line / dropdown rows. */
+.poster-source-badge.inline {
+  position: static;
+  margin-left: 0.45rem;
+  vertical-align: middle;
+  font-size: 0.58rem;
+  pointer-events: auto;
+}
+
 :root[data-theme="light"] .subtitle-watermark {
   background: rgba(255, 255, 255, 0.84);
   color: #12343b;

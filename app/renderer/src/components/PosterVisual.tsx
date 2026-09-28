@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { MovieRecord } from "../../../shared/contracts";
-import { getPosterFallbackBackground } from "../utils";
+import { getPosterFallbackBackground, getPosterSourceBadge } from "../utils";
 
 export const PosterVisual = memo(function PosterVisual(props: {
   movie: MovieRecord;
@@ -13,6 +13,7 @@ export const PosterVisual = memo(function PosterVisual(props: {
     : compact
       ? "poster-visual compact"
       : "poster-visual";
+  const sourceBadge = getPosterSourceBadge(movie.posterSource);
 
   return (
     <div className={className}>
@@ -31,6 +32,11 @@ export const PosterVisual = memo(function PosterVisual(props: {
             </small>
           </div>
         </div>
+      )}
+      {sourceBadge && (
+        <span className="poster-source-badge" title={movie.posterSource}>
+          {sourceBadge}
+        </span>
       )}
       <div className="poster-shade" />
     </div>

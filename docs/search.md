@@ -38,7 +38,7 @@ skip this table, the lint sends you back here.
 | `upsertMovie` | `INSERT INTO movies … ON CONFLICT(id) DO UPDATE` | all five: `title`, `video_id`, `source_path`, `actresses_json`, `keywords_json` | the scanner's and fileService's main entry; the upsert `COALESCE`s incoming `video_id` and `poster_url` against the stored row, and keeps `poster_source` when the incoming poster is null |
 | `deleteMovie` | `DELETE FROM subtitles WHERE movie_id = ?` + `DELETE FROM movies WHERE id = ?` | removes the row (and its subtitles) from search entirely | two statements, one method |
 | `updateMovieLocation` | `UPDATE movies SET source_path, folder_path, library_mode, updated_at` | `source_path` | `folder_path` and `library_mode` are filters, not searched text |
-| `updateMoviePoster` | `UPDATE movies SET poster_url, poster_source, updated_at` | none | posters are deliberately invisible to the search clause |
+| `updateMoviePoster` | `UPDATE movies SET poster_url, poster_source, updated_at` | none | posters are deliberately invisible to the search clause; `poster_source` carries the specific web source (`javdatabase`/`javbus`/`imdb`/`tmdb`, legacy `web`, or `local`) so the UI can attribute each cover |
 | `updateMovieVideoId` | `UPDATE movies SET video_id, updated_at` | `video_id` | metadataService's ID-correction path |
 
 That is the complete set: five methods, one insert, three updates, one

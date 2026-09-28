@@ -485,9 +485,8 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     method: "updateMoviePoster",
     fragments: ["UPDATE movies SET poster_url = ?, poster_source = ?, updated_at = ? WHERE id = ?"],
     exact: [
-      "none",
-      "local",
-      "web",
+      // poster_source now carries the specific web source (the contracts
+      // PosterSource union); the values are typed, not string literals.
       "UPDATE movies SET poster_url = ?, poster_source = ?, updated_at = ? WHERE id = ?"
     ],
   },
