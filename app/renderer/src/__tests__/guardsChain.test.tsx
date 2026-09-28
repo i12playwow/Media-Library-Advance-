@@ -142,7 +142,10 @@ describe("guardsChain service", () => {
     expect(segments, "the committed log verifies and parses").not.toBeNull();
     expect(segments!.length).toBeGreaterThanOrEqual(10);
     const entrySegments = segments!.filter((s) => s.kind === "entry");
-    expect(entrySegments.length).toBe(10);
+    // A floor, not an exact count: the log is append-only, and every drill
+    // or CI append legitimately grows it. An exact pin here would break on
+    // each honest run — the exactness lives in the chain replay instead.
+    expect(entrySegments.length).toBeGreaterThanOrEqual(10);
     expect(entrySegments[0].items[0].timestamp).toBe("2026-09-26T04:49:27.968Z");
     expect(segments![segments!.length - 1].digest).toMatch(/^[0-9a-f]{64}$/);
   });
