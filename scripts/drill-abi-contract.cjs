@@ -163,7 +163,7 @@ if (!process.env.CI) {
   const withEntry = normalized + entry;
   const digest = require("node:crypto").createHash("sha256").update(withEntry, "utf8").digest("hex");
   const entryCount = (withEntry.match(/^## /gm) || []).length;
-  fs.appendFileSync(GUARDS_LOG, withEntry + `- chain: ${digest} · entries ${entryCount}\n`, "utf8");
+  fs.appendFileSync(GUARDS_LOG, entry + `- chain: ${digest} · entries ${entryCount}\n`, "utf8");
   process.stdout.write(`\nappended drill entry to GUARDS-LOG.md\n`);
 }
 

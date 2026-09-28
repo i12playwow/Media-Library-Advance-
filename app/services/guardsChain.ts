@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import type { GuardsChainSegment, GuardsChainState } from "../shared/contracts";
+import type { GuardsChainSegment, GuardsChainSegmentsResult, GuardsChainState } from "../shared/contracts";
 
 // Mirrors drift class 8's replay in docsSearchRefs.test.ts: the log is a
 // sequence of chained segments (drill entries and absorbed CI batches), each
@@ -107,15 +107,24 @@ export function verifyChainLog(raw: string, now: Date = new Date()): GuardsChain
   };
 }
 
-// Per-segment extraction for the Settings breakdown (guards:listSegments).
-// Gated on a full verified replay of the SAME bytes — a tampered or
-// unchained log yields null, never a partial breakdown — then classifies
-// each segment from its items: `## ` heads are drill entries, CI-summary
-// lines are absorbed batches. No hashing here: verifyChainLog already
-// proved every digest on this input, keeping the file at exactly one
-// sha256 site (the lint pins it).
+// Verified per-segment extraction for the Settings breakdown
+// (guards:listSegments). Gated on a full replay of the SAME bytes — a
+// tampered or unchained log yields null, never a breakdown. That gate is
+// the contract: callers that need data even when verification fails go
+// through extractUnverifiedChainSegments, which cannot claim integrity.
+// No hashing here: verifyChainLog already proved every digest on this
+// input, keeping the file at exactly one sha256 site (the lint pins it).
 export function extractChainSegments(raw: string): GuardsChainSegment[] | null {
   if (!verifyChainLog(raw).ok) return null;
+  return buildSegments(raw);
+}
+
+// The parse-only half both extractors share: classify `## ` heads as drill
+// entries and CI-summary lines as absorbed batches, assign each segment its
+// chain line's digest and running entry count, and stamp each item with the
+// segment's digest prefix. Structure only — integrity is never asserted
+// here, so the file keeps exactly one sha256 site (the lint pins it).
+function buildSegments(raw: string): GuardsChainSegment[] {
   const logLines = toLf(raw).split("\n");
   const chainLines: Array<{ index: number; digest: string; entries: number }> = [];
   for (let i = 0; i < logLines.length; i++) {
@@ -151,17 +160,29 @@ export function extractChainSegments(raw: string): GuardsChainSegment[] | null {
       pending.items.push({ kind: "ci", timestamp: ci[1], verdict: ci[2] as "holds" | "BROKEN", digestPrefix: "" });
     }
   }
-  if (nextChain !== chainLines.length) return null;
+  if (nextChain !== chainLines.length) return [];
   for (const segment of segments) {
     for (const item of segment.items) item.digestPrefix = segment.digest.slice(0, 12);
   }
   return segments;
 }
 
-export function readGuardsChainSegments(): GuardsChainSegment[] | null {
+// Forensics variant for the unverified fallback: identical output shape to
+// extractChainSegments but NO gate — deliberately, so a broken chain's
+// history stays inspectable. Never for integrity claims: it hashes nothing
+// and its callers must banner the result as unverified (the renderer does;
+// the discriminated result type forces every consumer to branch).
+export function extractUnverifiedChainSegments(raw: string): GuardsChainSegment[] {
+  return buildSegments(raw);
+}
+
+export function readGuardsChainSegments(): GuardsChainSegmentsResult {
+  let raw: string;
   try {
-    return extractChainSegments(fs.readFileSync(LOG_PATH, "utf8"));
+    raw = fs.readFileSync(LOG_PATH, "utf8");
   } catch {
-    return null;
+    return { status: "unavailable" };
   }
+  if (verifyChainLog(raw).ok) return { status: "verified", segments: buildSegments(raw) };
+  return { status: "unverified", reason: "tampered", segments: extractUnverifiedChainSegments(raw) };
 }

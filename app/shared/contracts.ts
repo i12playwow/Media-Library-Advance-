@@ -301,3 +301,14 @@ export interface GuardsChainSegment {
   digest: string;
   entriesAtChain: number;
 }
+
+// Result of guards:listSegments. A discriminated union on purpose: verified
+// means the full hash-chain replay passed; unverified means it failed and
+// the attached parse-only breakdown (possibly null) is for inspection only;
+// unavailable means the log could not be read at all. Callers must branch —
+// there is no shape that shows segments without the caller knowing which
+// guarantee backs them.
+export type GuardsChainSegmentsResult =
+  | { status: "verified"; segments: GuardsChainSegment[] }
+  | { status: "unverified"; reason: "tampered"; segments: GuardsChainSegment[] | null }
+  | { status: "unavailable" };

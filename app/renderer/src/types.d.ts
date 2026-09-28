@@ -1,7 +1,7 @@
 import type {
   AppShellState,
   ConvertVideoResult,
-  GuardsChainSegment,
+  GuardsChainSegmentsResult,
   GuardsChainState,
   MetadataSettings,
   LibraryMode,
@@ -34,7 +34,7 @@ declare global {
       setThemeMode: (themeMode: "dark" | "light") => Promise<AppShellState>;
       getAppState: () => Promise<AppShellState>;
       getGuardsChainState: () => Promise<GuardsChainState>;
-      listGuardsChainSegments: () => Promise<GuardsChainSegment[] | null>;
+      listGuardsChainSegments: () => Promise<GuardsChainSegmentsResult>;
       saveMetadataSettings: (settings: MetadataSettings) => Promise<AppShellState>;
       saveOrganizationSettings: (settings: OrganizationSettings) => Promise<AppShellState>;
       pickLibraryFolder: () => Promise<string | null>;

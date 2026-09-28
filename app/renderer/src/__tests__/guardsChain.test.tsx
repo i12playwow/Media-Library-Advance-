@@ -4,7 +4,8 @@ import path from "node:path";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { verifyChainLog, extractChainSegments } from "../../../services/guardsChain";
+import type { GuardsChainSegmentsResult } from "../../../shared/contracts";
+import { verifyChainLog, extractChainSegments, extractUnverifiedChainSegments, readGuardsChainSegments } from "../../../services/guardsChain";
 import { GuardsChainCard, GuardsChainSection } from "../components/GuardsChainCard";
 
 // ── chain replay over fixture texts (no disk fixtures; digests computed) ───
@@ -141,9 +142,43 @@ describe("guardsChain service", () => {
     expect(segments, "the committed log verifies and parses").not.toBeNull();
     expect(segments!.length).toBeGreaterThanOrEqual(10);
     const entrySegments = segments!.filter((s) => s.kind === "entry");
-    expect(entrySegments.length).toBe(9);
+    expect(entrySegments.length).toBe(10);
     expect(entrySegments[0].items[0].timestamp).toBe("2026-09-26T04:49:27.968Z");
     expect(segments![segments!.length - 1].digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("unverified fallback", () => {
+  it("returns the same breakdown as the verified path over a healthy log", () => {
+    const raw = chainedLog([...THREE, CI_BATCH_BROKEN]);
+    const verified = extractChainSegments(raw);
+    expect(verified).not.toBeNull();
+    expect(extractUnverifiedChainSegments(raw)).toEqual(verified);
+  });
+
+  it("yields a parse-only breakdown over a tampered log — evidence without endorsement", () => {
+    const log = chainedLog(THREE).replace("rebuild-node ok", "rebuild-node oK");
+    expect(extractChainSegments(log)).toBeNull();
+    const segments = extractUnverifiedChainSegments(log);
+    expect(segments).toHaveLength(3);
+    expect(segments.map((s) => s.kind)).toEqual(["entry", "ci-batch", "entry"]);
+    expect(segments.every((s) => s.digest !== "")).toBe(true);
+  });
+
+  it("renders segments past a chainless tail instead of hiding them", () => {
+    const log = chainedLog([ENTRY_A]) + "\nfree text after the log\n";
+    const segments = extractUnverifiedChainSegments(log);
+    expect(segments).toHaveLength(1);
+  });
+
+  it("returns the union over the real committed log — the exact bytes the channel serves", () => {
+    const logPath = path.resolve(__dirname, "..", "..", "..", "..", "GUARDS-LOG.md");
+    const raw = fs.readFileSync(logPath, "utf8");
+    const result: GuardsChainSegmentsResult = readGuardsChainSegments();
+    expect(result.status).toBe("verified");
+    if (result.status !== "verified") return;
+    expect(result.segments).toEqual(extractChainSegments(raw));
+    expect(result.segments.length).toBeGreaterThanOrEqual(10);
   });
 });
 
@@ -200,7 +235,7 @@ describe("GuardsChainCard + GuardsChainSection", () => {
           lastRun: null,
           verifiedAt: "2026-09-28T05:00:00.000Z"
         }}
-        segments={[
+        chain={{ status: "verified", segments: [
           {
             kind: "entry",
             items: [{ kind: "entry", timestamp: "2026-09-27T17:35:20.857Z", verdict: "holds", digestPrefix: digestA.slice(0, 12) }],
@@ -213,7 +248,7 @@ describe("GuardsChainCard + GuardsChainSection", () => {
             digest: digestB,
             entriesAtChain: 1
           }
-        ]}
+        ] }}
       />
     );
     expect(screen.getByText(/drill entry/)).toBeInTheDocument();
@@ -223,6 +258,76 @@ describe("GuardsChainCard + GuardsChainSection", () => {
     expect(screen.getByText(/BROKEN/)).toBeInTheDocument();
     // The full digest rides the title attribute for hover inspection.
     expect(screen.getByTitle(digestA)).toBeInTheDocument();
+  });
+
+  it("renders a human-readable age next to each item's timestamp, deterministically", () => {
+    const now = new Date("2026-09-28T12:00:00.000Z");
+    render(
+      <GuardsChainCard
+        now={now}
+        state={{
+          ok: true,
+          segments: 1,
+          entries: 1,
+          tipDigest: "f".repeat(64),
+          lastRun: null,
+          verifiedAt: now.toISOString()
+        }}
+        chain={{ status: "verified", segments: [
+          {
+            kind: "entry",
+            items: [
+              { kind: "entry", timestamp: "2026-09-28T11:59:30.000Z", verdict: "holds", digestPrefix: "1".repeat(12) },
+              { kind: "entry", timestamp: "2026-09-24T12:00:00.000Z", verdict: "holds", digestPrefix: "2".repeat(12) },
+              { kind: "entry", timestamp: "2026-03-28T12:00:00.000Z", verdict: "holds", digestPrefix: "3".repeat(12) },
+              { kind: "entry", timestamp: "not-a-timestamp", verdict: "holds", digestPrefix: "4".repeat(12) }
+            ],
+            digest: "1".repeat(64),
+            entriesAtChain: 1
+          }
+        ] }}
+      />
+    );
+    expect(screen.getByText(/just now/)).toBeInTheDocument();
+    expect(screen.getByText(/4 days ago/)).toBeInTheDocument();
+    expect(screen.getByText(/6 months ago/)).toBeInTheDocument();
+    // Unparseable timestamps degrade to an em dash, not NaN.
+    expect(screen.getByText(/· —/)).toBeInTheDocument();
+  });
+
+  it("banners an unverified result and renders its breakdown for inspection", () => {
+    const digest = "9".repeat(64);
+    render(
+      <GuardsChainCard
+        state={{
+          ok: false,
+          segments: 2,
+          entries: 1,
+          tipDigest: digest,
+          lastRun: null,
+          verifiedAt: "2026-09-28T05:00:00.000Z"
+        }}
+        chain={{
+          status: "unverified",
+          reason: "tampered",
+          segments: [
+            {
+              kind: "entry",
+              items: [{ kind: "entry", timestamp: "2026-09-27T17:35:20.857Z", verdict: "holds", digestPrefix: digest.slice(0, 12) }],
+              digest,
+              entriesAtChain: 1
+            }
+          ]
+        }}
+      />
+    );
+    expect(screen.getByText("FAILURE")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Unverified breakdown — the hash-chain replay FAILED/)
+    ).toBeInTheDocument();
+    // The parse-only history stays visible under the banner.
+    expect(screen.getByText(/drill entry/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-09-27T17:35:20.857Z/)).toBeInTheDocument();
   });
 
   it("renders the failure state loudly", () => {
@@ -259,7 +364,7 @@ describe("GuardsChainCard + GuardsChainSection", () => {
       },
       listGuardsChainSegments: async () => {
         segCalls++;
-        return SEGMENTS_STUB;
+        return { status: "verified", segments: SEGMENTS_STUB };
       }
     };
 
@@ -290,7 +395,7 @@ describe("GuardsChainCard + GuardsChainSection", () => {
             verifiedAt: "2026-09-28T05:00:00.000Z"
           };
         },
-        listGuardsChainSegments: async () => []
+        listGuardsChainSegments: async () => ({ status: "unavailable" })
       };
 
       render(<GuardsChainSection />);

@@ -184,3 +184,21 @@ edit. After a *legitimate* rewrite, re-seed the whole chain with
 | 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
 | 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
 - chain: ff47b39be4bf8b9c2439b14bc8a8a76113f0c2731101352bcf7d2ca4e856a8da · entries 9
+
+## 2026-09-28T01:03:46.265Z — contract holds (10/10 legs)
+
+- node v24.19.0 · better-sqlite3 12.11.1 · electron 41.1.1 · commit 2e014e3 · win32 · 21s
+
+| # | Leg | Result | Kind | Detail |
+|---|---|---|---|---|
+| 1 | 1. rebuild:node (baseline) | ✅ | contract | rebuild-node ok |
+| 2 | 2. pretest gate green on Node-ABI baseline | ✅ | contract | abi-check ok |
+| 3 | 3. flip to Electron-ABI (postinstall state) | ✅ | contract | rebuild-electron ok |
+| 4 | 4. npm test aborts on wrong-ABI binding | ✅ | contract | exit 1 with verbatim mismatch, vitest never started |
+| 5 | 5. gate leaves the binding untouched (pure gate) | ✅ | contract | mtime 1781544280000 → 1781544280000 |
+| 6 | 6. pretest:e2e self-heals the identical state | ✅ | contract | rebuilt for electron + gate green under electron-as-node |
+| 7 | 7. verify:abi:electron proves the healed state directly | ✅ | contract | gate green |
+| 8 | 8. diagnose --fix heals case 1 back to Node-ABI | ✅ | contract | exit 0, FIX OK, binding rewritten, node gate green |
+| 9 | R1. restore: rebuild:node | ✅ | restore | rebuild-node ok |
+| 10 | R2. restore: gate green (UNIT-READY) | ✅ | restore | abi-check ok |
+- chain: b1246ff08a61fcb12fd38c5de74c73e71b7c13d0812b87ca9c3b54b17532b571 · entries 10

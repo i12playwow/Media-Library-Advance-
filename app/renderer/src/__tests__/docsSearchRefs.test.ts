@@ -1438,6 +1438,8 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     const appender = read(path.join("scripts", "append-drill-log.cjs"));
     const refill = read(path.join("scripts", "refill-log-chain.cjs"));
 
+    const drillAppend = M("appendFileSync(GUARDS_LOG, ", "entry");
+    const drillCount = M("withEntry.match(", "/^## /gm)");
     // The drill writer: exactly one hashing site, boundary = file + entry,
     // LF-normalized — the boundary bug an end-to-end run once caught.
     expect(count(drill, sha256Call), "drill writer: exactly one sha256 site").toBe(1);
@@ -1445,6 +1447,13 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(count(drill, drillUpdate), "drill writer: hashes the file+entry buffer").toBe(1);
     expect(count(drill, normalizeAtom), "drill writer: LF-normalizes before hashing").toBe(1);
     expect(count(drill, digestHex), "drill writer: hex digest").toBe(1);
+    // The append bug an end-to-end drill run caught in 2e014e3's aftermath:
+    // the writer hashed file+entry but APPENDED file+entry, duplicating the
+    // log on every run — invisible to every boundary pin above. The append
+    // call is pinned too: only the new bytes go to disk, and the entry
+    // count is derived from the same hashed buffer.
+    expect(count(drill, drillAppend), "drill writer: appends only the new bytes, never the hashed whole").toBe(1);
+    expect(count(drill, drillCount), "drill writer: entry count comes from the hashed buffer").toBe(1);
 
     // The CI appender: one hashing site, boundary = file + CI lines.
     expect(count(appender, sha256Call), "CI appender: exactly one sha256 site").toBe(1);

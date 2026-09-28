@@ -1,17 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GuardsChainSegment, GuardsChainState } from "../../../shared/contracts";
+import type { GuardsChainSegmentsResult, GuardsChainState } from "../../../shared/contracts";
 
 function shortDigest(digest: string): string {
   return `${digest.slice(0, 12)}…${digest.slice(-6)}`;
 }
 
+// Human-readable age next to each breakdown item's timestamp, computed
+// against a configurable `now` (defaults to real time) so tests stay
+// deterministic. Future timestamps clamp to "just now"; unparseable ones
+// degrade to an em dash rather than NaN.
+function ageOf(timestamp: string, now: Date = new Date()): string {
+  const then = new Date(timestamp).getTime();
+  if (!Number.isFinite(then)) return "—";
+  const seconds = Math.max(0, Math.round((now.getTime() - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days === 1 ? "1 day" : `${days} days`} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months === 1 ? "1 month" : `${months} months`} ago`;
+  const years = Math.floor(months / 12);
+  return `${years === 1 ? "1 year" : `${years} years`} ago`;
+}
+
 export function GuardsChainCard(props: {
   state: GuardsChainState | null;
-  segments?: GuardsChainSegment[] | null;
+  chain?: GuardsChainSegmentsResult | null;
   error?: string | null;
   onRefresh?: () => void;
+  now?: Date;
 }) {
-  const { state, segments, error, onRefresh } = props;
+  const { state, chain, error, onRefresh, now } = props;
+  const showSegments = chain?.status === "verified" || chain?.status === "unverified";
+  const unverified = chain?.status === "unverified";
   return (
     <div className="panel">
       <p className="eyebrow">Guards</p>
@@ -43,9 +67,18 @@ export function GuardsChainCard(props: {
           <li>Verified at: {state.verifiedAt}</li>
         </ul>
       )}
-      {segments !== undefined && segments !== null && segments.length > 0 ? (
+      {unverified ? (
+        <p className="subtle">
+          ⚠ Unverified breakdown — the hash-chain replay FAILED, so this
+          history is shown for inspection only and may have been tampered
+          with. Run npm test for the named break.
+        </p>
+      ) : null}
+      {showSegments && chain.segments && chain.segments.length > 0 ? (
         <ul className="plain-list">
-          {segments.map((segment, index) => (
+          {chain.segments ? (
+            <>
+              {chain.segments.map((segment, index) => (
             <li key={index}>
               <code title={segment.digest}>{segment.digest.slice(0, 12)}</code>{" "}
               <span className="subtle">
@@ -57,11 +90,14 @@ export function GuardsChainCard(props: {
                   <li key={itemIndex}>
                     {item.timestamp} — {item.verdict === "holds" ? "holds" : "BROKEN"}{" "}
                     <span className="subtle">({item.kind === "ci" ? "ci" : "drill"})</span>
+                    <span className="subtle"> · {ageOf(item.timestamp, now)}</span>
                   </li>
                 ))}
               </ul>
             </li>
-          ))}
+              ))}
+            </>
+          ) : null}
         </ul>
       ) : null}
       {onRefresh ? (
@@ -82,7 +118,7 @@ export function GuardsChainSection() {
   const POLL_INTERVAL_MS = 30_000;
   const refreshInFlight = useRef(false);
   const [state, setState] = useState<GuardsChainState | null>(null);
-  const [segments, setSegments] = useState<GuardsChainSegment[] | null>(null);
+  const [chain, setChain] = useState<GuardsChainSegmentsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -92,10 +128,10 @@ export function GuardsChainSection() {
       window.desktopApi.getGuardsChainState(),
       window.desktopApi.listGuardsChainSegments()
     ])
-      .then(([nextState, nextSegments]) => {
+      .then(([nextState, nextChain]) => {
         refreshInFlight.current = false;
         setState(nextState);
-        setSegments(nextSegments);
+        setChain(nextChain);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -116,6 +152,6 @@ export function GuardsChainSection() {
   }, [refresh]);
 
   return (
-    <GuardsChainCard state={state} segments={segments} error={error} onRefresh={refresh} />
+    <GuardsChainCard state={state} chain={chain} error={error} onRefresh={refresh} />
   );
 }
