@@ -74,8 +74,11 @@ $graphics.FillPath([System.Drawing.Brushes]::White, $playPath)
 $outlinePen = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(50, 255, 255, 255), 2)
 $graphics.DrawPath($outlinePen, $path)
 
-$pngPath = "C:\Users\TheoSoungWin10\Desktop\MLA+\resources\icon.png"
-$icoPath = "C:\Users\TheoSoungWin10\Desktop\MLA+\resources\icon.ico"
+# Write next to this script's repo checkout so the tool is portable:
+# no hardcoded user paths, works from any clone location.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$pngPath = Join-Path $repoRoot "resources\icon.png"
+$icoPath = Join-Path $repoRoot "resources\icon.ico"
 $bitmap.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
 
 $pngBytes = [System.IO.File]::ReadAllBytes($pngPath)

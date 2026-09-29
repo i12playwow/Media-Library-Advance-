@@ -1,7 +1,7 @@
 # MediaLibrary Plus
 
-[![CI](https://github.com/Creative-hub554/medialibrary-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/Creative-hub554/medialibrary-plus/actions/workflows/ci.yml)
-[![ABI Contract Drill](https://github.com/Creative-hub554/medialibrary-plus/actions/workflows/drill.yml/badge.svg)](https://github.com/Creative-hub554/medialibrary-plus/actions/workflows/drill.yml)
+[![CI](https://github.com/i12playwow/Media-Library-Advance-/actions/workflows/ci.yml/badge.svg)](https://github.com/i12playwow/Media-Library-Advance-/actions/workflows/ci.yml)
+[![ABI Contract Drill](https://github.com/i12playwow/Media-Library-Advance-/actions/workflows/drill.yml/badge.svg)](https://github.com/i12playwow/Media-Library-Advance-/actions/workflows/drill.yml)
 
 MediaLibrary Plus is a Windows desktop app for organizing and browsing local video libraries, with a focus on JAV collections. It scans folders, filters supported video files, generates poster-based browsing views, organizes files into Normal and Gentle Mode workspaces, and provides a built-in player with subtitle support.
 
