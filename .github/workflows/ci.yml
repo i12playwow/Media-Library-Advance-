@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
   # Nightly: dependency drift (Electron, better-sqlite3, Playwright, runner
   # images) shows up here without burning e2e minutes on every push.
   schedule:
@@ -22,7 +22,7 @@ on:
 # Shared runners are a shared budget: a new push to the same ref makes any
 # in-progress run for that ref obsolete. The event name is part of the group
 # so a scheduled run can never cancel a push run — both happen on
-# refs/heads/master.
+# refs/heads/main.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true

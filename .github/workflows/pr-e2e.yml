@@ -5,7 +5,7 @@ name: PR E2E (label-gated)
 # (workflow_call); this caller only gates it behind the label, so ordinary
 # PR pushes never pay the e2e cost. It runs against the PR's merge ref,
 # from the base branch's copy of the workflow — the same contract CI runs
-# on master.
+# on main.
 on:
   pull_request_target:
     types: [labeled]

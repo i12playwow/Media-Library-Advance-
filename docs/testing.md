@@ -148,7 +148,7 @@ every bolded name below is a real step in the workflow, and every command
 cited here is a command a step really runs — stop matching and `npm test`
 fails (drift class 3).
 
-The unit and typecheck jobs fire on every push to master and on pull
+The unit and typecheck jobs fire on every push to main and on pull
 requests. The e2e job fires on a nightly schedule (plus manual dispatch),
 so dependency drift is caught without burning its minutes on every push —
 and ABI-sensitive pull requests can run it on demand by adding the

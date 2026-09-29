@@ -148,7 +148,7 @@ to `scripts/drill-abi-contract.cjs` (legs 1–8 plus the R1–R2 restore).
 
 ## Releases
 
-A release is a tag plus a `gh release create vX.Y.Z --target master`. That
+A release is a tag plus a `gh release create vX.Y.Z --target main`. That
 fires `.github/workflows/generator-generic-ossf-slsa3-publish.yml`, which
 packages the Windows installer natively on a Windows runner, attaches it to
 the release, and signs SLSA v3 provenance over its sha256 (builder ref
