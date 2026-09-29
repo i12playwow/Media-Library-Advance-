@@ -224,3 +224,38 @@ so postinstall and the Playwright install skip what the cache already
 holds. The cache is inert to the ABI contract — it stores downloads, never
 the binding, and every gate verdict still comes from a live proof in the
 job's own runtime.
+
+### When the drill's append job goes red
+
+The drill's **Append the chained CI summaries** job is the only writer of
+`GUARDS-LOG.md` from CI, and its push can fail for exactly two reasons —
+both recoverable without touching the log, which stays chained and
+consistent either way (a failed push writes nothing):
+
+1. **A race it could not win.** **Push (re-append on race, up to 3
+   attempts)** already re-appends on a fresh tip twice before giving up;
+   three losing races in a row means something was landing faster than
+   the job could rebase — for a weekly cadence, almost always a
+   human-pushed burst. Once the branch is quiet, re-run the failed job
+   from the Actions tab: the appender rebuilds the batch from the run's
+   artifacts on the new tip and the chain stays contiguous.
+2. **A ruleset rejection.** `main` is guarded by the `main-guard-stack`
+   ruleset, whose bypass list names the triggering user — not a bot
+   identity. A scheduled run that GitHub attributes to
+   `github-actions[bot]` rather than a user is therefore not exempt, and
+   all three push attempts are rejected. The signature in the job log is
+   a remote rejection (`! [remote rejected]`) repeating identically on
+   every attempt — not a merge conflict, not a flaky test. The recovery
+   is the dispatch fallback: run the workflow manually via the Actions
+   tab's **Run workflow** button on `main`. A manual run's actor is the
+   dispatcher, who is on the bypass list, so the same artifacts append
+   and chain cleanly. (The long-term fix, if this ever fires in
+   practice, is a PR fallback in the append job — deliberately not
+   built speculatively.)
+
+Either way the verdict lines themselves are safe: they ride in run
+artifacts (30-day retention), so a red append job delays history, it
+never loses it. The Monday-after diagnosis is: read the append job's
+log, classify by the two signatures above, recover by re-run or
+dispatch, and confirm `GUARDS-LOG.md` gained exactly three OS lines
+ending with a fresh `- chain:` line.
