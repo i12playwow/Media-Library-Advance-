@@ -111,3 +111,7 @@ local.settings.json
 __blobstorage__
 __queuestorage__
 __azurite_db*__.json
+
+# Private local notes — support drafts and one-off files that must never
+# reach the public repo
+github-billing-support-ticket.md
