@@ -8,16 +8,17 @@ name: Drill
 # CI verdicts are tamper-evident history too (drift class 8).
 #
 # On Linux the drill job additionally runs the behavioral tamper leg
-# (npm run probe:tamper → scripts/tamper-probe.cjs): it tampers one byte of
-# GUARDS-LOG.md's first drill entry, runs the guards-chain e2e spec, and
-# requires the real app to serve the tamper as an unverified FAILURE through
-# the real preload bridge — the UNVERIFIED half of the chain contract, which
-# no structural pin can see. The leg is Linux-only because it launches
-# Electron (xvfb) and the drill leaves the binding Node-ABI, so the probe
-# heals its own ABI in the pretest:e2e order (rule 3). Its verdict rides in
-# the OS summary line as a `tamper holds|BROKEN` clause: holds only when the
-# probe's own egress marker proves the leg passed, BROKEN when it failed or
-# never ran — never a fabricated holds.
+# (npm run probe:tamper → scripts/tamper-probe.cjs): it runs the guards-chain
+# e2e spec, whose own arc tampers one byte of GUARDS-LOG.md's first drill
+# entry and requires the real app to serve the tamper as an unverified
+# FAILURE through the real preload bridge — the UNVERIFIED half of the chain
+# contract, which no structural pin can see. The probe snapshots the log and
+# verifies it byte-exact after the run. The leg is Linux-only because it
+# launches Electron (xvfb) and the drill leaves the binding Node-ABI, so the
+# probe heals its own ABI in the pretest:e2e order (rule 3). Its verdict
+# rides in the OS summary line as a `tamper holds|BROKEN` clause: holds only
+# when the probe's own egress marker proves the leg passed, BROKEN when it
+# failed or never ran — never a fabricated holds.
 #
 # The append job needs contents: write to push GUARDS-LOG.md; the drill jobs
 # stay read-only. The log is append-only with distinct timestamped lines, so

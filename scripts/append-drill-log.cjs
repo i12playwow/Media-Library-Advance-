@@ -11,10 +11,11 @@
 //
 // The optional `· tamper holds|BROKEN` clause rides only on lines from the
 // OS that runs drill.yml's behavioral tamper leg (Linux): scripts/
-// tamper-probe.cjs tampers GUARDS-LOG.md itself and requires the real app
-// to serve the tamper as an unverified FAILURE. Its verdict is history like
-// any other: tamper holds proves the unverified path was exercised and
-// green that week; tamper BROKEN is a red leg recorded as such.
+// tamper-probe.cjs runs the guards-chain e2e spec, whose own arc tampers
+// GUARDS-LOG.md mid-run and requires the real app to serve the tamper as an
+// unverified FAILURE. Its verdict is history like any other: tamper holds
+// proves the unverified path was exercised and green that week; tamper
+// BROKEN is a red leg recorded as such.
 //
 // The chain line digests every byte before it — pre-log plus the new CI
 // lines — LF-normalized, matching drift class 8's replay in

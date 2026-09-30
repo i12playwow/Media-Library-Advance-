@@ -203,10 +203,13 @@ dispatch) carries the same contract one step further than the nightly e2e
 job: alongside the structural ABI drill on all three OSes, its Linux job
 adds a behavioral tamper leg — **Install Electron system dependencies**
 provisions the Chromium libraries and linker-cache proof exactly like the
-e2e job, then **Run the tamper probe** flips one byte of
-the committed `GUARDS-LOG.md`'s first drill entry, runs the guards-chain e2e
-spec against the real app, and requires that tamper to surface as the
-mandatory unverified FAILURE through the real preload bridge. The leg is
+e2e job, then **Run the tamper probe** runs the guards-chain e2e
+spec against the real app: the spec's own arc flips one byte of
+the committed `GUARDS-LOG.md`'s first drill entry and requires that tamper
+to surface as the mandatory unverified FAILURE through the real preload
+bridge (the probe pre-snapshots the log and proves it byte-exact after —
+it deliberately does not tamper the log itself, so the spec's
+verified-launch phase stays honest). The leg is
 Linux-only because it launches Electron under xvfb and the drill leaves the
 binding Node-ABI, so the probe heals its own ABI in the `pretest:e2e` order
 (rule 3); rule 5 is why it is not part of the local drill. The verdict is

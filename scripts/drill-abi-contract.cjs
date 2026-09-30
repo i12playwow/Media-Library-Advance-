@@ -112,7 +112,17 @@ try {
   // finally-block rebuild hits a Windows file lock on the mapped binding.
   const r8 = npm(["run", "diagnose:abi", "--", "--fix"]);
   const fixOk = r8.status === 0 && /FIX OK/.test(r8.output) && /gate green/.test(r8.output);
-  record("8", "diagnose --fix heals case 1 back to Node-ABI", fixOk, "exit 0, FIX OK, binding rewritten, node gate green");
+  // The success detail is the contract's own words; on a red leg the detail
+  // carries diagnose's actual tail so the log says what really happened
+  // instead of asserting a verdict the run never delivered.
+  record(
+    "8",
+    "diagnose --fix heals case 1 back to Node-ABI",
+    fixOk,
+    fixOk
+      ? "exit 0, FIX OK, binding rewritten, node gate green"
+      : `exit ${r8.status}, diagnose said: ${r8.output.trim().split("\n").filter(Boolean).slice(-3).join(" | ").replace(/\s+/g, " ").slice(0, 300) || "(no output captured)"}`
+  );
 } finally {
   // ── Restore: leave the machine unit-ready no matter what happened ────────
   // One retry on the rebuild: npm occasionally exits nonzero on transient

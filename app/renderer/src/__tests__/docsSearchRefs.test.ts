@@ -111,7 +111,12 @@ const LEG_LABELS = [
 // shape fails loudly rather than silently asserting nothing.
 function resolvePlaywrightConfig(env: NodeJS.ProcessEnv) {
   const savedEnv = process.env;
-  process.env = { ...savedEnv, ...env };
+  // Each scenario starts from a CLEAN slate: the ambient environment must
+  // not leak into the scenario being resolved, or on CI the CI=1 ambient
+  // variable would silently turn the "local" branch into a CI one and the
+  // local-strictness assertions would assert nothing. The caller's argument
+  // is the whole truth about the environment being simulated.
+  process.env = { ...env };
   try {
     const { stripTypeScriptTypes } = require("node:module");
     const js = stripTypeScriptTypes(
@@ -1638,11 +1643,22 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
 
     const probe = stripLineComments(fs.readFileSync(path.join(repoRoot, "scripts", "tamper-probe.cjs"), "utf8"));
     const occurrences = (src: string, needle: string) => src.split(needle).length - 1;
-    // The tamper itself: one canary byte-flip of the committed log's first
-    // drill entry, proven to have taken before anything depends on it.
-    expect(occurrences(probe, "rebuild-node oK"), "the probe flips exactly one canary byte").toBe(1);
-    expect(occurrences(probe, "rebuild-node ok"), "the canary's untampered spelling appears once").toBe(1);
-    expect(probe, "the tamper is proven to have taken").toContain("if (tampered === original)");
+    // The probe does NOT tamper the log itself: the guards-chain spec owns
+    // the whole arc (verified launch → one-byte flip → unverified FAILURE
+    // → restore), and a probe-side pre-flip would defeat the spec's
+    // verified-launch phase, making the leg impossible to pass. The canary
+    // byte-flip lives in the spec and must stay there.
+    expect(occurrences(probe, "rebuild-node oK"), "the probe flips no canary byte itself").toBe(0);
+    expect(occurrences(probe, "writeFileSync(LOG, tampered"), "the probe writes no tampered log").toBe(0);
+    // The probe snapshots the log before the run and proves byte-exactness
+    // afterwards, unconditionally — repairing from the snapshot on any
+    // drift, because the committed log must leave the leg untouched.
+    expect(probe, "the snapshot is taken before the spec runs").toContain("snapshot = fs.readFileSync(LOG, \"utf8\")");
+    const probeFinallyAt = probe.indexOf("} finally {");
+    const checkAt = probe.indexOf("const after = fs.readFileSync(LOG, \"utf8\")");
+    expect(checkAt, "the byte-exactness check happens in the finally block").toBeGreaterThan(probeFinallyAt);
+    expect(probe, "a mismatch is a red exit").toContain("after !== snapshot");
+    expect(probe, "a mismatch is repaired from the snapshot").toContain("fs.writeFileSync(LOG, snapshot");
     // The verdict is behavioral: the spec must pass (its app under test
     // reports the tamper as an unverified FAILURE), accepted only from
     // Playwright's own output — a silent green without the pass line is a
@@ -1652,12 +1668,9 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       "green requires the pass line and exit 0 together, exactly once"
     ).toBe(1);
     expect(occurrences(probe, "tamper-probe: leg PASSED"), "the egress marker exists exactly once").toBe(1);
-    // Restoration is unconditional and verified: the finally block rewrites
-    // the snapshot and compares it back — a botched restore is a red exit.
-    const probeFinallyAt = probe.indexOf("} finally {");
-    const restoreAt = probe.indexOf("fs.writeFileSync(LOG, original");
-    expect(restoreAt, "the restore happens in the finally block").toBeGreaterThan(probeFinallyAt);
-    expect(probe, "the restore is verified byte-exact").toContain("restored !== original");
+    // A red leg prints the captured Playwright report: a verdict without
+    // its evidence is not diagnosable from the job log.
+    expect(probe, "a red leg re-prints the playwright report").toContain("playwright report (verbatim)");
   });
 
   it("drift class 9, rule 6: diagnose --fix heals via rebuild, gates its exit, and leaves a unit-ready binding untouched", () => {

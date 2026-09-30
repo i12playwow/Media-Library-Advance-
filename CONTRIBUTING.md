@@ -51,9 +51,10 @@ must heal the identical state, and `diagnose:abi -- --fix` must restore
 Node-ABI on demand — then it restores your machine in a `finally` block,
 even when a leg fails. On CI's Linux runner the weekly drill applies the
 same idea to the guards log: `scripts/tamper-probe.cjs` (via
-`npm run probe:tamper`) tampers one byte of the committed `GUARDS-LOG.md`
-and requires the real app to serve the tamper as an unverified FAILURE —
-the probe's `finally` block restores the log byte-exactly.
+`npm run probe:tamper`) runs the guards-chain e2e spec, whose own arc
+tampers one byte of the committed `GUARDS-LOG.md` and requires the real
+app to serve the tamper as an unverified FAILURE — the probe snapshots
+the log and proves it byte-exact in its `finally` block.
 
 ### The scripts behind the dance
 
@@ -80,9 +81,10 @@ specifies it in full:
 - `scripts/drill-abi-contract.cjs` — the 8 contract legs + R1–R2 restore,
   with a `finally`-guarded restore and the `GUARDS-LOG.md` append.
 - `scripts/tamper-probe.cjs` — the CI drill's behavioral tamper leg (driven
-  by `npm run probe:tamper`): tampers one byte of the committed log, runs
-  the guards-chain e2e spec, accepts only a genuinely-run green verdict,
-  and restores the log byte-exactly in its own `finally` block.
+  by `npm run probe:tamper`): runs the guards-chain e2e spec (which carries
+  the tamper arc itself), accepts only a genuinely-run green verdict,
+  re-prints the Playwright report on a red leg, and verifies the log
+  byte-exact in its own `finally` block.
 
 One implementation constraint is contractual because Windows enforces it:
 **a successful load maps `better_sqlite3.node` into the loading process, and a
