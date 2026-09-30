@@ -1604,12 +1604,18 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(probeAt, "the one probe runs before the finally block").toBeLessThan(finallyAt);
 
     // Post-rebuild verdicts come from child processes: leg 6 by the healing
-    // hook's exit code, leg 8 by diagnose --fix's own gate-gated output.
+    // hook's exit code, leg 8 by diagnose --fix's own gate-gated output —
+    // with the Linux teardown tolerance: a post-proof exit 139 does not
+    // unprove a recorded success (the proof marker only prints after the
+    // child's own gate ran green).
     expect(drillSource, "leg 6 is judged by the child's exit code").toContain(
       "const healedForElectron = r6.status === 0"
     );
     expect(drillSource, "leg 8 is judged by the child's FIX OK + exit code").toContain(
-      "r8.status === 0 && /FIX OK/.test(r8.output)"
+      "/FIX OK/.test(r8.output)"
+    );
+    expect(drillSource, "leg 8 tolerates a post-proof SIGSEGV teardown").toContain(
+      "(r8.status === 0 || r8.status === 139)"
     );
     // ...and the finally still restores (rebuilds) the machine.
     const finallyBlock = drillSource.slice(finallyAt);

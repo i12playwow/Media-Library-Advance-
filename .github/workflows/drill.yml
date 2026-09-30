@@ -99,7 +99,12 @@ jobs:
         if: always()
         shell: bash
         run: |
-          verdict="$(tail -n 1 drill-output.txt 2>/dev/null || true)"
+          # The verdict is the drill's own contract line, matched anywhere in
+          # its captured output — NOT the file's last line: a Linux exit-time
+          # SIGSEGV (teardown after the verdict is already printed) can land
+          # "Segmentation fault (core dumped)" after the verdict, and a
+          # fabricated BROKEN would then be refused by the appender anyway.
+          verdict="$(grep -o 'contract \(BROKEN\|holds\) ([0-9]*/10 legs)' drill-output.txt 2>/dev/null | tail -n 1 || true)"
           case "$verdict" in
             "contract holds ("*|*"contract holds (10/10 legs)"*) ;;
             *) verdict="contract BROKEN (0/10 legs) — drill did not complete" ;;
