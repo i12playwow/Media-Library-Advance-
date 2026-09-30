@@ -262,3 +262,39 @@ never loses it. The Monday-after diagnosis is: read the append job's
 log, classify by the two signatures above, recover by re-run or
 dispatch, and confirm `GUARDS-LOG.md` gained exactly three OS lines
 ending with a fresh `- chain:` line.
+
+### Billing-lock incident timeline (2026-09-22 → 2026-09-30, resolved)
+
+A stale billing flag locked Actions for this repository from Sep 22
+(see archived ticket #4795533) despite a $0-balance Free plan. Both
+payment instruments offered failed independently (card declined by the
+issuer, PayPal agreement error), and GitHub lifted the lock on Sep 30
+shortly after archived ticket #4807091. The drill and the nightly e2e
+job executed for the first time inside this window, which is why
+several run IDs below are load-bearing history for the guards.
+
+| When (UTC)          | Run                       | What happened                                                                   |
+|---------------------|---------------------------|---------------------------------------------------------------------------------|
+| Sep 30 09:59        | 36699427758               | Drill green on all three OSes; append push declined GH013 — the ruleset bypass list has no Actions actor (later fixed via a PAT secret) |
+| Sep 30 09:45        | 36698052223               | ubuntu drill 10/10 legs + tamper holds; verdict captured cleanly despite a post-verdict SIGSEGV; append push declined GH013 |
+| Sep 30 09:31        | 36696559104               | tamper leg green for the first time; drill verdict misread a crash line, the appender refused the malformed summary — fail-closed worked |
+| Sep 30 09:11        | 36568175356 (re-run)      | first real execution of the CI jobs: TypeScript and e2e green; unit run exposed an env-blind config test (fixed same day) |
+| Sep 30 08:46, 09:15 | 36691784332 (2 attempts)  | win/mac green; ubuntu exposed two drill bugs: a hardcoded leg 8 detail and the tamper probe defeating the spec verified-launch phase |
+| Sep 30 ~08:40       | —                         | billing lock lifted; #4807091 archived (no payment method on file, no staff reply) |
+| Sep 30 07:00        | —                         | PayPal billing-agreement attempt failed with a generic processing error         |
+| Sep 30 06:50        | 36653456402               | Drill dispatch: zero steps, billing-lock annotation (ground truth while the banner was up) |
+| Sep 30 01:03        | 36653256689               | Drill dispatch: zero steps, billing-lock annotation                              |
+| Sep 30 00:55–01:05  | —                         | card verification hold declined again (issuer security rules)                    |
+| Sep 30 ~01:00       | —                         | billing address saved successfully (blank-country gap fixed)                     |
+| Sep 29 12:27        | 36568175356               | CI on b7a122a: zero steps, billing-lock annotation                               |
+| Sep 29 12:20        | 36567484788               | Drill dispatch: zero steps, billing-lock annotation                              |
+| Sep 29 12:19        | —                         | card verification hold declined (issuer security rules; bank confirmed code-only)|
+| Sep 29 06:59        | 36534038471               | Drill dispatch: zero steps, billing-lock annotation                              |
+| Sep 29 06:14        | 36530092788               | CI on a Dependabot PR: zero steps, billing-lock annotation                        |
+| Sep 29 05:12        | 36525085609               | CI: zero steps, billing-lock annotation                                          |
+| Sep 29 04:07        | 36520190070               | CI: zero steps, billing-lock annotation (first symptom)                          |
+
+The balance was never real (Free plan, $0.02 metered usage in
+September, no minutes ever consumed). Every killed job showed zero
+executed steps with the same annotation: The job was not started
+because your account is locked due to a billing issue.
