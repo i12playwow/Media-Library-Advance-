@@ -97,9 +97,14 @@ import path from "node:path";
 //     Support-ticket references (any 6+-digit #number; sized to the
 //     incident's 7-digit IDs, which are deliberately not pinned here —
 //     writing them into this committed file would publish exactly what the
-//     lint keeps out) and for email addresses, excepting only GitHub's
-//     anonymized users.noreply.github.com domain. An account-identifying
-//     detail in the public tree fails npm test instead of leaking quietly.
+//     lint keeps out), and every committed doc, workflow, and script is
+//     scanned for email addresses — excepting only GitHub's anonymized
+//     users.noreply.github.com domain, and shaped so workflow `uses:` refs
+//     like `file.yml@v2.1.0` stay inert — and for GitHub credential
+//     fragments (`github_pat_`/`ghp_`-family prefixes; the secret's NAME is
+//     public contract, its value and every prose fragment are not). An
+//     account-identifying detail in the public tree fails npm test instead
+//     of leaking quietly.
 //
 //   drift class 13 — the private ledger's ignore rules are contract too:
 //     .gitignore's "Private local notes" section must carry exactly the
@@ -384,14 +389,20 @@ const appendTokenExpression =
   /^[ \t]+token:[ \t]*(\S[^\n]*)$/m.exec(appendLogSource)?.[1]?.trim() ?? "";
 
 // ── drift class 12 data: the privacy split's scan surface ──────────────────
-// Which docs are "committed" is decided by git itself, not a hardcoded
+// Which files are "committed" is decided by git itself, not a hardcoded
 // list: `git ls-files` returns exactly the tracked set, so the gitignored
 // private ledger sits outside the scan by construction, and a file enters
-// the public surface only by being committed to it.
-const trackedMdFiles = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" })
+// the public surface only by being committed to it. Two surfaces: the docs
+// (prose leaks) and the workflows + scripts (where a credential pasted
+// into executable config would ride the next push).
+const trackedFiles = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" })
   .split(/\r?\n/)
   .map((f) => f.trim())
-  .filter((f) => f.length > 0 && f.toLowerCase().endsWith(".md"));
+  .filter((f) => f.length > 0);
+const trackedMdFiles = trackedFiles.filter((f) => f.toLowerCase().endsWith(".md"));
+const trackedWorkflowAndScriptFiles = trackedFiles.filter(
+  (f) => f.startsWith(".github/workflows/") || f.startsWith("scripts/")
+);
 
 // Support tickets are 7-digit references; six-plus digits leaves headroom
 // for future IDs while Markdown headings (`# 2026-…`), anchor fragments,
@@ -403,16 +414,31 @@ const SUPPORT_TICKET_RE = /#[0-9]{6,}/;
 
 // Emails: any address-shaped token fails, except GitHub's official
 // anonymized users.noreply.github.com domain — non-identifying by
-// construction (the drill's commit identity rides it).
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+// construction (the drill's commit identity rides it). The final label
+// must be alphabetic (2+), which keeps workflow `uses:` refs like
+// `generator_generic_slsa3.yml@v2.1.0` out of the scan while real TLDs
+// still match.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 const EMAIL_ALLOW_RE = /@users\.noreply\.github\.com$/i;
 
-function scanTrackedDocs(matcher: (line: string) => boolean, label: string): string[] {
-  if (trackedMdFiles.length === 0) {
-    throw new Error("no tracked .md files — the privacy scan would be vacuous");
+// GitHub credential fragments: any occurrence of a PAT-family prefix
+// (`github_pat_`, `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`) — even truncated
+// prose like `github_pat_…K2NH9` carries the prefix, so the prefix alone
+// is the tripwire. The secret's NAME (`GUARDS_PUSH_TOKEN`) is public
+// contract and unaffected; only values and value fragments fail.
+const TOKEN_FRAGMENT_RE = /(?:github_pat|gh[pousr])_[A-Za-z0-9_-]*/;
+const tokenFragmentIn = (line: string): boolean => TOKEN_FRAGMENT_RE.test(line);
+
+function scanTrackedFiles(
+  files: string[],
+  matcher: (line: string) => boolean,
+  label: string
+): string[] {
+  if (files.length === 0) {
+    throw new Error("no files to scan — the privacy scan would be vacuous");
   }
   const hits: string[] = [];
-  for (const file of trackedMdFiles) {
+  for (const file of files) {
     const lines = fs.readFileSync(path.join(repoRoot, file), "utf8").split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       if (matcher(lines[i])) {
@@ -1206,7 +1232,7 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // not. `git ls-files` decides what is committed — the gitignored
     // private ledger is exempt by construction — so a ticket reference in
     // any tracked doc fails here instead of leaking quietly.
-    const hits = scanTrackedDocs(ticketIn, "Support-ticket number");
+    const hits = scanTrackedFiles(trackedMdFiles, ticketIn, "Support-ticket number");
     expect(
       trackedMdFiles.length,
       "the scan surface is real (git ls-files found the docs)"
@@ -1214,13 +1240,32 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(hits, "ticket references in committed docs").toEqual([]);
   });
 
-  it("drift class 12: no email address appears in any committed Markdown doc (GitHub noreply excepted)", () => {
+  it("drift class 12: no email address appears in any committed doc, workflow, or script (GitHub noreply excepted)", () => {
     // Account-identifying addresses live only in the private ledger. The
     // single exception is GitHub's anonymized users.noreply.github.com
     // domain, which identifies no person — the drill's commit identity
     // rides it, and the runbook may legitimately name it.
-    const hits = scanTrackedDocs(emailIn, "email address");
-    expect(hits, "email addresses in committed docs").toEqual([]);
+    const hits = [
+      ...scanTrackedFiles(trackedMdFiles, emailIn, "email address"),
+      ...scanTrackedFiles(trackedWorkflowAndScriptFiles, emailIn, "email address"),
+    ];
+    expect(
+      trackedWorkflowAndScriptFiles.length,
+      "the workflow/script surface is real"
+    ).toBeGreaterThan(10);
+    expect(hits, "email addresses in committed files").toEqual([]);
+  });
+
+  it("drift class 12: no GitHub token fragment appears in any committed doc, workflow, or script", () => {
+    // The token's value and every prose fragment of it (`github_pat_…`)
+    // stay private; only the secret's name is public contract. Scanning
+    // the executable surface too means a credential pasted into a workflow
+    // or script fails npm test before it can ride a push.
+    const hits = [
+      ...scanTrackedFiles(trackedMdFiles, tokenFragmentIn, "token fragment"),
+      ...scanTrackedFiles(trackedWorkflowAndScriptFiles, tokenFragmentIn, "token fragment"),
+    ];
+    expect(hits, "GitHub token fragments in committed files").toEqual([]);
   });
 
   // ── drift class 13 — the private ledger's ignore rules are contract ──────
