@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -89,6 +90,16 @@ import path from "node:path";
 //     section documents the same flow — the secret as the append path and
 //     the fallback as deliberate — so neither the workflow nor the docs
 //     can silently drop the ruleset bypass or its guardrail.
+//
+//   drift class 12 — the privacy split is self-enforcing: every committed
+//     Markdown doc — `git ls-files` decides "committed", so the gitignored
+//     private ledger is exempt by construction — is scanned for
+//     Support-ticket references (any 6+-digit #number; sized to the
+//     incident's 7-digit IDs, which are deliberately not pinned here —
+//     writing them into this committed file would publish exactly what the
+//     lint keeps out) and for email addresses, excepting only GitHub's
+//     anonymized users.noreply.github.com domain. An account-identifying
+//     detail in the public tree fails npm test instead of leaking quietly.
 //
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
@@ -361,6 +372,55 @@ if (appendLogAt === -1) throw new Error("no `append-log:` job found in drill.yml
 const appendLogSource = drillWorkflowSource.slice(appendLogAt);
 const appendTokenExpression =
   /^[ \t]+token:[ \t]*(\S[^\n]*)$/m.exec(appendLogSource)?.[1]?.trim() ?? "";
+
+// ── drift class 12 data: the privacy split's scan surface ──────────────────
+// Which docs are "committed" is decided by git itself, not a hardcoded
+// list: `git ls-files` returns exactly the tracked set, so the gitignored
+// private ledger sits outside the scan by construction, and a file enters
+// the public surface only by being committed to it.
+const trackedMdFiles = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" })
+  .split(/\r?\n/)
+  .map((f) => f.trim())
+  .filter((f) => f.length > 0 && f.toLowerCase().endsWith(".md"));
+
+// Support tickets are 7-digit references; six-plus digits leaves headroom
+// for future IDs while Markdown headings (`# 2026-…`), anchor fragments,
+// and hex colors (letter-bearing) stay inert. The incident's own ticket
+// IDs are deliberately NOT pinned here: writing them into this committed
+// file would publish exactly what this class exists to keep out — the
+// generic rule already catches them.
+const SUPPORT_TICKET_RE = /#[0-9]{6,}/;
+
+// Emails: any address-shaped token fails, except GitHub's official
+// anonymized users.noreply.github.com domain — non-identifying by
+// construction (the drill's commit identity rides it).
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+const EMAIL_ALLOW_RE = /@users\.noreply\.github\.com$/i;
+
+function scanTrackedDocs(matcher: (line: string) => boolean, label: string): string[] {
+  if (trackedMdFiles.length === 0) {
+    throw new Error("no tracked .md files — the privacy scan would be vacuous");
+  }
+  const hits: string[] = [];
+  for (const file of trackedMdFiles) {
+    const lines = fs.readFileSync(path.join(repoRoot, file), "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (matcher(lines[i])) {
+        hits.push(`${file}:${i + 1} — ${label}: ${lines[i].trim().slice(0, 120)}`);
+      }
+    }
+  }
+  return hits;
+}
+
+const ticketIn = (line: string): boolean => SUPPORT_TICKET_RE.test(line);
+
+const emailIn = (line: string): boolean => {
+  for (const m of line.matchAll(EMAIL_RE)) {
+    if (!EMAIL_ALLOW_RE.test(m[0])) return true;
+  }
+  return false;
+};
 
 const testingMd = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf8");
 const ciSection = testingMd.slice(testingMd.indexOf("## CI"));
@@ -752,7 +812,7 @@ const boldTokens = [...ciSection.matchAll(/\*\*([^*]+)\*\*/g)].map((m) =>
 const citedCommands = [...ciSection.matchAll(/`((?:npm|npx|xvfb-run)[^`]*)`/g)].map((m) => m[1]);
 const allRuns = Object.values(jobs).flatMap((job) => job.steps.map((s) => s.run ?? ""));
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10)", () => {
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -1104,6 +1164,29 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(norm(testingMd), "the doc keeps the fallback's fail-closed semantics").toContain(
       "`github.token`, all three push attempts are rejected"
     );
+  });
+
+  // ── drift class 12 — the privacy split is self-enforcing ──────────────────
+  it("drift class 12: no Support-ticket number appears in any committed Markdown doc", () => {
+    // The billing-lock timeline is public; the ticket correspondence is
+    // not. `git ls-files` decides what is committed — the gitignored
+    // private ledger is exempt by construction — so a ticket reference in
+    // any tracked doc fails here instead of leaking quietly.
+    const hits = scanTrackedDocs(ticketIn, "Support-ticket number");
+    expect(
+      trackedMdFiles.length,
+      "the scan surface is real (git ls-files found the docs)"
+    ).toBeGreaterThan(5);
+    expect(hits, "ticket references in committed docs").toEqual([]);
+  });
+
+  it("drift class 12: no email address appears in any committed Markdown doc (GitHub noreply excepted)", () => {
+    // Account-identifying addresses live only in the private ledger. The
+    // single exception is GitHub's anonymized users.noreply.github.com
+    // domain, which identifies no person — the drill's commit identity
+    // rides it, and the runbook may legitimately name it.
+    const hits = scanTrackedDocs(emailIn, "email address");
+    expect(hits, "email addresses in committed docs").toEqual([]);
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
