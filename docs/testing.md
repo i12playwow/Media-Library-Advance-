@@ -277,12 +277,13 @@ log, classify by the two signatures above, recover by refreshing
 just re-running it (race signature), and confirm `GUARDS-LOG.md`
 gained exactly three OS lines ending with a fresh `- chain:` line.
 
-### Billing-lock incident timeline (2026-09-22 → 2026-09-30, resolved)
+### Billing-lock incident timeline (2026-09-22 → 2026-10-02, resolved)
 
 The lock's real origin, per GitHub Support's reply on ticket #4795533 (2026-09-30 08:32 UTC, agent Elodie): an earlier GitHub Copilot trial signup required a payment method, the system ran a card authorization check on it, the authorization failed, and the account was locked with Copilot never provisioned. Support then unlocked the account manually — that reply is the unlock event, landing minutes before the first green jobs. Both payment instruments offered during the incident failed independently (card declined by the issuer, PayPal agreement error), which is why the #4807091 route produced no fix and was archived without a staff reply. The drill and the nightly e2e job executed for the first time inside this window, which is why several run IDs below are load-bearing history for the guards.
 
 | When (UTC)          | Run                       | What happened                                                                   |
 |---------------------|---------------------------|---------------------------------------------------------------------------------|
+| Oct 1–2             | 36945421215, 36949763894  | append push unblocked: a fine-grained PAT (this repo only, read/write contents, rotated to no-expiry) stored as the GUARDS_PUSH_TOKEN secret; two green appends chained the CI lines (4a5ea3d, 938b889) and the flow was pinned as lint contract (0ef82af, 3f5d040) |
 | Sep 30 09:59        | 36699427758               | Drill green on all three OSes; append push declined GH013 — the ruleset bypass list has no Actions actor (later fixed via a PAT secret) |
 | Sep 30 09:45        | 36698052223               | ubuntu drill 10/10 legs + tamper holds; verdict captured cleanly despite a post-verdict SIGSEGV; append push declined GH013 |
 | Sep 30 09:31        | 36696559104               | tamper leg green for the first time; drill verdict misread a crash line, the appender refused the malformed summary — fail-closed worked |
