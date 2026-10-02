@@ -82,6 +82,14 @@ import path from "node:path";
 //     emptied, vacuous, or skipped check fails npm test instead of passing
 //     silently.
 //
+//   drift class 11 — the drill's append push rides GUARDS_PUSH_TOKEN: the
+//     append job's checkout `with:` block pins the exact token expression
+//     (the secret first, the default token as the fail-closed fallback) and
+//     the PAT's documented scope, while docs/testing.md's drill-recovery
+//     section documents the same flow — the secret as the append path and
+//     the fallback as deliberate — so neither the workflow nor the docs
+//     can silently drop the ruleset bypass or its guardrail.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -341,6 +349,18 @@ const drillWorkflowTriggers = parseWorkflowTopLevel(drillWorkflowSource).on as {
 };
 const ciCron =
   (Array.isArray(triggers.schedule) ? (triggers.schedule as Array<{ cron?: string }>)[0]?.cron : "") ?? "";
+
+// ── drift class 11 data: the append job's checkout token expression ────────
+// parseCiWorkflow deliberately ignores `with:` blocks (they are
+// contract-free on every other step), so the one load-bearing with-value —
+// which identity the append push carries — is lifted structurally from the
+// workflow source: the append-log job's slice, and the single `token:`
+// line inside its checkout `with:` block.
+const appendLogAt = drillWorkflowSource.indexOf("\n  append-log:");
+if (appendLogAt === -1) throw new Error("no `append-log:` job found in drill.yml");
+const appendLogSource = drillWorkflowSource.slice(appendLogAt);
+const appendTokenExpression =
+  /^[ \t]+token:[ \t]*(\S[^\n]*)$/m.exec(appendLogSource)?.[1]?.trim() ?? "";
 
 const testingMd = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf8");
 const ciSection = testingMd.slice(testingMd.indexOf("## CI"));
@@ -1046,6 +1066,44 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     for (const ref of new Set([...drillWorkflowSource.matchAll(/scripts\/[\w./-]+\.cjs/g)].map((m) => m[0]))) {
       expect(fs.existsSync(path.join(repoRoot, ref)), `${ref} exists`).toBe(true);
     }
+  });
+
+  // ── drift class 11 — the append push rides GUARDS_PUSH_TOKEN ──────────────
+  it("drift class 11: the append job's checkout pins the GUARDS_PUSH_TOKEN expression, fail-closed", () => {
+    // The parser ignores `with:` blocks by design (they are contract-free
+    // everywhere else), so the one load-bearing with-value is pinned here
+    // from the workflow source itself: the append job is the only writer,
+    // and its checkout decides which identity the push carries. The
+    // expression must name the secret first and fall back to the default
+    // token — the fallback is what makes a missing or rotated secret fail
+    // closed (three GH013 rejections, history recorded in the runbook)
+    // instead of pushing through an unprivileged identity.
+    expect(appendLogSource, "the append-log job is the workflow's last job").toBe(
+      drillWorkflowSource.slice(drillWorkflowSource.indexOf("\n  append-log:"))
+    );
+    const tokenLines = appendLogSource.match(/^[ \t]+token:[ \t]*\S.*$/gm) ?? [];
+    expect(tokenLines, "exactly one push-identity choice in the append job").toHaveLength(1);
+    expect(appendTokenExpression, "the checkout token expression").toBe(
+      "${{ secrets.GUARDS_PUSH_TOKEN || github.token }}"
+    );
+    // The wiring comment documents the secret's required shape right where
+    // it is used — the PAT's scope is contract material too.
+    expect(appendLogSource, "the wiring comment names the PAT's scope").toContain(
+      "Contents: read and write"
+    );
+  });
+
+  it("drift class 11: docs/testing.md documents the same GUARDS_PUSH_TOKEN flow (doc → workflow)", () => {
+    // The runbook's append-recovery section must keep describing the token
+    // as the append path and the fallback as deliberate — a doc edit that
+    // drops either half breaks this pin, exactly as a workflow edit that
+    // drops the expression breaks the one above.
+    expect(norm(testingMd), "the doc names the secret as the append path").toContain(
+      "pushes through `secrets.GUARDS_PUSH_TOKEN`"
+    );
+    expect(norm(testingMd), "the doc keeps the fallback's fail-closed semantics").toContain(
+      "`github.token`, all three push attempts are rejected"
+    );
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
