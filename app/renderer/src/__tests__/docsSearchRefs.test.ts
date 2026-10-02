@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -100,6 +100,16 @@ import path from "node:path";
 //     lint keeps out) and for email addresses, excepting only GitHub's
 //     anonymized users.noreply.github.com domain. An account-identifying
 //     detail in the public tree fails npm test instead of leaking quietly.
+//
+//   drift class 13 — the private ledger's ignore rules are contract too:
+//     .gitignore's "Private local notes" section must carry exactly the
+//     pinned pattern set (currently the one private ledger filename), the
+//     live resolution must actually exclude each pinned name through
+//     .gitignore itself (probed with `git check-ignore -v`: a later `!`
+//     negation or shadowing rule changes the reported rule and fails
+//     loudly), and no tracked file may match any of the repo's own ignore
+//     rules (`git ls-files -i -c`) — so a private file can neither be
+//     un-ignored nor force-added without failing npm test.
 //
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
@@ -421,6 +431,30 @@ const emailIn = (line: string): boolean => {
   }
   return false;
 };
+
+// ── drift class 13 data: the private-ledger ignore contract ────────────────
+// The .gitignore patterns that keep private notes out of the public repo
+// are pinned exactly, in both directions: the section must still carry
+// them, and the live git resolution must actually honor them. The set is
+// exact — adding another private file to .gitignore fails here until this
+// inventory is updated too, so the private surface can never grow silently.
+const PRIVATE_LEDGER_PATTERNS = ["github-billing-support-ticket.md"];
+
+const gitignoreLines = fs
+  .readFileSync(path.join(repoRoot, ".gitignore"), "utf8")
+  .split(/\r?\n/);
+
+// The "Private local notes" section: the comment header marks it, and its
+// patterns are the non-comment, non-blank lines that follow it.
+const privateSectionAt = gitignoreLines.findIndex((l) => l.includes("Private local notes"));
+if (privateSectionAt === -1) throw new Error('no "Private local notes" section in .gitignore');
+const privateSectionPatterns: string[] = [];
+for (let i = privateSectionAt + 1; i < gitignoreLines.length; i++) {
+  const line = gitignoreLines[i].trim();
+  if (line === "") break;
+  if (line.startsWith("#")) continue;
+  privateSectionPatterns.push(line);
+}
 
 const testingMd = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf8");
 const ciSection = testingMd.slice(testingMd.indexOf("## CI"));
@@ -1187,6 +1221,44 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // rides it, and the runbook may legitimately name it.
     const hits = scanTrackedDocs(emailIn, "email address");
     expect(hits, "email addresses in committed docs").toEqual([]);
+  });
+
+  // ── drift class 13 — the private ledger's ignore rules are contract ──────
+  it("drift class 13: .gitignore still carries the private-ledger patterns, and git actually honors them", () => {
+    // Presence: the pinned pattern set is the whole private surface — a
+    // deletion, a comment-out, or a silent addition all fail here.
+    expect(privateSectionPatterns, "the private-ledger pattern set").toEqual(
+      PRIVATE_LEDGER_PATTERNS
+    );
+
+    // Mechanism: git's live resolution must exclude each pinned name via
+    // .gitignore itself. A later `!` negation still reports a match (exit
+    // 0), so the assertion is on the reported rule, not the exit status.
+    for (const pattern of PRIVATE_LEDGER_PATTERNS) {
+      const probe = spawnSync("git", ["check-ignore", "-v", "--", pattern], {
+        cwd: repoRoot,
+        encoding: "utf8",
+      });
+      const [rule] = (probe.stdout ?? "").trim().split("\t");
+      const reported = /^\.gitignore:\d+:(.*)$/.exec(rule ?? "")?.[1];
+      expect(probe.status, `git check-ignore ${pattern} runs`).toBe(0);
+      expect(reported, `the .gitignore rule that decides ${pattern}`).toBe(pattern);
+    }
+
+    // Conservation: no tracked file may match any of the repo's own ignore
+    // rules — nothing matching the private surface has ever been committed,
+    // force-add included. --exclude-per-directory keeps this hermetic: only
+    // the repo's .gitignore files count, not a machine's global config.
+    const trackedIgnored = spawnSync(
+      "git",
+      ["ls-files", "-i", "-c", "--exclude-per-directory=.gitignore"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    expect(trackedIgnored.status, "git ls-files -i runs").toBe(0);
+    const leaked = (trackedIgnored.stdout ?? "")
+      .split(/\r?\n/)
+      .filter((l) => l.trim() !== "");
+    expect(leaked, "tracked files matched by the repo's own ignore rules").toEqual([]);
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
