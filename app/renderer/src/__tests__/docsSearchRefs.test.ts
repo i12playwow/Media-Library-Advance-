@@ -102,7 +102,11 @@ import path from "node:path";
 //     users.noreply.github.com domain, and shaped so workflow `uses:` refs
 //     like `file.yml@v2.1.0` stay inert — and for GitHub credential
 //     fragments (`github_pat_`/`ghp_`-family prefixes; the secret's NAME is
-//     public contract, its value and every prose fragment are not). An
+//     public contract, its value and every prose fragment are not) across
+//     docs, workflows, scripts, and the app source tree — tokens only
+//     there, since fixtures legitimately fake email addresses. The lint
+//     file itself is the one documented exclusion from the app surface:
+//     the enforcement file must name the prefixes it bans. An
 //     account-identifying detail in the public tree fails npm test instead
 //     of leaking quietly.
 //
@@ -408,6 +412,18 @@ const trackedFiles = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" 
 const trackedMdFiles = trackedFiles.filter((f) => f.toLowerCase().endsWith(".md"));
 const trackedWorkflowAndScriptFiles = trackedFiles.filter(
   (f) => f.startsWith(".github/workflows/") || f.startsWith("scripts/")
+);
+
+// The app source joins the token scan only — never the email scan: test
+// fixtures legitimately fake addresses. The lint file itself is excluded
+// from this surface by necessity: it must name the very prefixes it
+// enforces (the same self-reference class 10 solves with comment
+// stripping — here the catalog prose IS the documentation of the ban), so
+// its exclusion is a deliberate, loudly-documented blind spot of exactly
+// one file, asserted below so it cannot silently rot if the lint moves.
+const LINT_FILE_REL = "app/renderer/src/__tests__/docsSearchRefs.test.ts";
+const appSourceFiles = trackedFiles.filter(
+  (f) => f.startsWith("app/") && /\.(ts|tsx|cjs)$/i.test(f) && f !== LINT_FILE_REL
 );
 
 // Support tickets are 7-digit references; six-plus digits leaves headroom
@@ -1262,15 +1278,24 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(hits, "email addresses in committed files").toEqual([]);
   });
 
-  it("drift class 12: no GitHub token fragment appears in any committed doc, workflow, or script", () => {
+  it("drift class 12: no GitHub token fragment appears in any committed doc, workflow, script, or app source", () => {
     // The token's value and every prose fragment of it (`github_pat_…`)
     // stay private; only the secret's name is public contract. Scanning
-    // the executable surface too means a credential pasted into a workflow
-    // or script fails npm test before it can ride a push.
+    // the executable surface too means a credential pasted into a workflow,
+    // script, or app source file fails npm test before it can ride a push.
     const hits = [
       ...scanTrackedFiles(trackedMdFiles, tokenFragmentIn, "token fragment"),
       ...scanTrackedFiles(trackedWorkflowAndScriptFiles, tokenFragmentIn, "token fragment"),
+      ...scanTrackedFiles(appSourceFiles, tokenFragmentIn, "token fragment"),
     ];
+    expect(
+      appSourceFiles.length,
+      "the app-source surface is real"
+    ).toBeGreaterThan(40);
+    expect(
+      appSourceFiles.includes(LINT_FILE_REL),
+      "the lint file's documented exclusion from its own scan still holds"
+    ).toBe(false);
     expect(hits, "GitHub token fragments in committed files").toEqual([]);
   });
 
