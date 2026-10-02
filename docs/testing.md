@@ -244,24 +244,38 @@ consistent either way (a failed push writes nothing):
    artifacts on the new tip and the chain stays contiguous.
 2. **A ruleset rejection.** `main` is guarded by the `main-guard-stack`
    ruleset, whose bypass list names the triggering user — not a bot
-   identity. A scheduled run that GitHub attributes to
-   `github-actions[bot]` rather than a user is therefore not exempt, and
-   all three push attempts are rejected. The signature in the job log is
-   a remote rejection (`! [remote rejected]`) repeating identically on
-   every attempt — not a merge conflict, not a flaky test. The recovery
-   is the dispatch fallback: run the workflow manually via the Actions
-   tab's **Run workflow** button on `main`. A manual run's actor is the
-   dispatcher, who is on the bypass list, so the same artifacts append
-   and chain cleanly. (The long-term fix, if this ever fires in
-   practice, is a PR fallback in the append job — deliberately not
-   built speculatively.)
+   identity, and GitHub offers no Actions actor to add to it. The append
+   job therefore pushes through `secrets.GUARDS_PUSH_TOKEN` — a
+   fine-grained personal access token scoped to this repository with
+   read and write access to code and no expiration date — which checkout
+   wires into origin's credentials so the push lands as the account that
+   already bypasses the ruleset. This is the proven path: the first
+   append after the token landed (run 36945421215, 2026-10-02) pushed
+   and chained on the first attempt, and every green append since has
+   ridden the same secret. Without it — secret absent, revoked, or
+   stale after a rotation — checkout falls back to the default
+   `github.token`, all three push attempts are rejected, and that
+   failure is deliberate: the appender fails closed rather than writing
+   through an unprivileged identity. The signature in the job log is a
+   remote rejection (`! [remote rejected]`) repeating identically on
+   every attempt — not a merge conflict, not a flaky test — and it is
+   the token's cue: refresh the secret's value in the repository
+   settings (generate the fine-grained PAT, store it as
+   `GUARDS_PUSH_TOKEN`), then re-run the failed append job or dispatch
+   the workflow from the Actions tab's **Run workflow** button on
+   `main`. (Historically, before the token existed, manual dispatch was
+   the only recovery because the dispatcher sat on the bypass list;
+   runs 36699427758, 36698052223, and 36696559104 each pushed as the
+   bot and were rejected. A PR fallback in the append job remains
+   deliberately unbuilt.)
 
 Either way the verdict lines themselves are safe: they ride in run
 artifacts (30-day retention), so a red append job delays history, it
 never loses it. The Monday-after diagnosis is: read the append job's
-log, classify by the two signatures above, recover by re-run or
-dispatch, and confirm `GUARDS-LOG.md` gained exactly three OS lines
-ending with a fresh `- chain:` line.
+log, classify by the two signatures above, recover by refreshing
+`GUARDS_PUSH_TOKEN` and re-running the job (rejection signature) or
+just re-running it (race signature), and confirm `GUARDS-LOG.md`
+gained exactly three OS lines ending with a fresh `- chain:` line.
 
 ### Billing-lock incident timeline (2026-09-22 → 2026-09-30, resolved)
 
