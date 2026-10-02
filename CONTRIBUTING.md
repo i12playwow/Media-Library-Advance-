@@ -124,8 +124,9 @@ must fail when the code stops honoring it.**
 
 > Scope note: after a checkout lost the original lint file, the recreated
 > `docsSearchRefs.test.ts` is layer 1 entire — **drift classes 2, 3, 4, 5, 6,
-> 7, 8, 9, and 10** live there, each named in the test list and catalogued in the
-> file's header. Extend the lint — don't retire it.
+> 7, 8, 9, 10, 11, 12, 13, and 14** live there (class 14 keeps this very
+> catalog in sync with the lint's actual class set), each named in the test
+> list and catalogued in the file's header. Extend the lint — don't retire it.
 
 ## State of the guards
 

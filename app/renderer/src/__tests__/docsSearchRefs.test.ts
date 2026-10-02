@@ -116,6 +116,12 @@ import path from "node:path";
 //     rules (`git ls-files -i -c`) — so a private file can neither be
 //     un-ignored nor force-added without failing npm test.
 //
+//   drift class 14 — the catalog watches itself: CONTRIBUTING.md's
+//     scope-note blockquote must name exactly the drift classes the lint
+//     actually enforces — every `drift class N` mention in this file's
+//     header and test titles, nothing more, nothing less — so the public
+//     description of layer 1 cannot drift from the layer itself.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -872,7 +878,7 @@ const boldTokens = [...ciSection.matchAll(/\*\*([^*]+)\*\*/g)].map((m) =>
 const citedCommands = [...ciSection.matchAll(/`((?:npm|npx|xvfb-run)[^`]*)`/g)].map((m) => m[1]);
 const allRuns = Object.values(jobs).flatMap((job) => job.steps.map((s) => s.run ?? ""));
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)", () => {
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -1304,6 +1310,36 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       .split(/\r?\n/)
       .filter((l) => l.trim() !== "");
     expect(leaked, "tracked files matched by the repo's own ignore rules").toEqual([]);
+  });
+
+  // ── drift class 14 — the catalog watches itself ───────────────────────────
+  it("drift class 14: CONTRIBUTING's layer-1 catalog names exactly the drift classes the lint enforces", () => {
+    // The scope-note blockquote is the public description of layer 1; this
+    // check keeps it in lockstep with the lint itself. The lint's side of
+    // the comparison is its raw source — the header catalogue plus every
+    // test title and section comment — so an unnumbered historical test
+    // (classes 3 and 6 predate the per-test naming) is still counted via
+    // its header mention. A class added to the lint without the catalog
+    // (or catalogued without being enforced) fails here.
+    const scopeNoteAt = contributingMd.indexOf("drift classes ");
+    const liveThereAt = contributingMd.indexOf("live there", scopeNoteAt);
+    expect(scopeNoteAt, "CONTRIBUTING's scope note names a class set").toBeGreaterThan(-1);
+    expect(liveThereAt, "the scope note's class list is bounded").toBeGreaterThan(scopeNoteAt);
+    expect(liveThereAt - scopeNoteAt, "the class list stays a list, not the document").toBeLessThan(
+      200
+    );
+    const catalogClasses = new Set(
+      (contributingMd.slice(scopeNoteAt, liveThereAt).match(/\d+/g) ?? []).map(Number)
+    );
+    expect(catalogClasses.size, "the catalog lists real classes").toBeGreaterThan(5);
+    const lintRaw = fs.readFileSync(lintSourcePath, "utf8");
+    const lintClasses = new Set(
+      [...lintRaw.matchAll(/drift class (\d+)/g)].map((m) => Number(m[1]))
+    );
+    expect(
+      [...catalogClasses].sort((a, b) => a - b),
+      "CONTRIBUTING's catalog vs the lint's actual classes"
+    ).toEqual([...lintClasses].sort((a, b) => a - b));
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
