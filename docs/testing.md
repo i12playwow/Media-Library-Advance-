@@ -279,7 +279,7 @@ gained exactly three OS lines ending with a fresh `- chain:` line.
 
 ### Billing-lock incident timeline (2026-09-22 → 2026-10-02, resolved)
 
-The lock's real origin, per GitHub Support's reply on ticket #4795533 (2026-09-30 08:32 UTC, agent Elodie): an earlier GitHub Copilot trial signup required a payment method, the system ran a card authorization check on it, the authorization failed, and the account was locked with Copilot never provisioned. Support then unlocked the account manually — that reply is the unlock event, landing minutes before the first green jobs. Both payment instruments offered during the incident failed independently (card declined by the issuer, PayPal agreement error), which is why the #4807091 route produced no fix and was archived without a staff reply. The drill and the nightly e2e job executed for the first time inside this window, which is why several run IDs below are load-bearing history for the guards.
+The lock's real origin, per GitHub Support's reply on the earlier ticket (2026-09-30 08:32 UTC, agent Elodie): an earlier GitHub Copilot trial signup required a payment method, the system ran a card authorization check on it, the authorization failed, and the account was locked with Copilot never provisioned. Support then unlocked the account manually — that reply is the unlock event, landing minutes before the first green jobs. Both payment instruments offered during the incident failed independently (card declined by the issuer, PayPal agreement error), which is why the newer ticket produced no fix and was archived without a staff reply. The drill and the nightly e2e job executed for the first time inside this window, which is why several run IDs below are load-bearing history for the guards.
 
 | When (UTC)          | Run                       | What happened                                                                   |
 |---------------------|---------------------------|---------------------------------------------------------------------------------|
@@ -289,7 +289,7 @@ The lock's real origin, per GitHub Support's reply on ticket #4795533 (2026-09-3
 | Sep 30 09:31        | 36696559104               | tamper leg green for the first time; drill verdict misread a crash line, the appender refused the malformed summary — fail-closed worked |
 | Sep 30 09:11        | 36568175356 (re-run)      | first real execution of the CI jobs: TypeScript and e2e green; unit run exposed an env-blind config test (fixed same day) |
 | Sep 30 08:46, 09:15 | 36691784332 (2 attempts)  | win/mac green; ubuntu exposed two drill bugs: a hardcoded leg 8 detail and the tamper probe defeating the spec verified-launch phase |
-| Sep 30 ~08:40       | —                         | lock lifted by an explicit GitHub Support unlock (reply on #4795533 at 08:32); #4807091 archived without a reply |
+| Sep 30 ~08:40       | —                         | lock lifted by an explicit GitHub Support unlock (staff reply at 08:32); the newer ticket archived without a reply |
 | Sep 30 07:00        | —                         | PayPal billing-agreement attempt failed with a generic processing error         |
 | Sep 30 06:50        | 36653456402               | Drill dispatch: zero steps, billing-lock annotation (ground truth while the banner was up) |
 | Sep 30 01:03        | 36653256689               | Drill dispatch: zero steps, billing-lock annotation                              |
@@ -302,11 +302,11 @@ The lock's real origin, per GitHub Support's reply on ticket #4795533 (2026-09-3
 | Sep 29 06:14        | 36530092788               | CI on a Dependabot PR: zero steps, billing-lock annotation                        |
 | Sep 29 05:12        | 36525085609               | CI: zero steps, billing-lock annotation                                          |
 | Sep 29 04:07        | 36520190070               | CI: zero steps, billing-lock annotation (first symptom)                          |
-| before Sep 22       | —                         | root cause (per #4795533): a Copilot-trial signup's card authorization check failed, locking the account |
+| before Sep 22       | —                         | root cause (per Support's reply): a Copilot-trial signup's card authorization check failed, locking the account |
 
 The balance was never real (Free plan, $0.02 metered usage in
 September, no minutes ever consumed). Every killed job showed zero
 executed steps with the same annotation: The job was not started
 because your account is locked due to a billing issue.
 
-The follow-up ledger ticket #4812507 (opened 2026-10-01) keeps the processor-records question open: it asks GitHub for the Zuora-side entries behind the Sep 29–30 card declines and the PayPal billing-agreement error, neither of which the Copilot-trial explanation covers.
+The follow-up ledger ticket (opened 2026-10-01) keeps the processor-records question open: it asks GitHub for the Zuora-side entries behind the Sep 29–30 card declines and the PayPal billing-agreement error, neither of which the Copilot-trial explanation covers.
