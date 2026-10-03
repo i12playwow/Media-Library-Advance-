@@ -126,6 +126,18 @@ import path from "node:path";
 //     header and test titles, nothing more, nothing less — so the public
 //     description of layer 1 cannot drift from the layer itself.
 //
+//   drift class 15 — the heartbeat watches itself: the dedicated
+//     drift-lint.yml schedule (added so doc/config drift reaching main
+//     without a linted push — a ruleset-bypass commit, an admin merge, a
+//     silent UI edit — is caught within a day) is contract too. Its daily
+//     cron is pinned exactly and must stay offset from ci.yml's nightly and
+//     the drill's weekly slot; the job must run ONLY the lint file through
+//     the npm filter, with the suite-wide ABI rebuild wired before it (the
+//     pure pretest gate would otherwise abort on the postinstall Electron
+//     ABI); and it must stay read-only with a bounded step appetite — no
+//     write grant, no e2e, no unfiltered suite. Deleting the heartbeat or
+//     quietly widening it into a second full-suite runner fails npm test.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -894,7 +906,7 @@ const boldTokens = [...ciSection.matchAll(/\*\*([^*]+)\*\*/g)].map((m) =>
 const citedCommands = [...ciSection.matchAll(/`((?:npm|npx|xvfb-run)[^`]*)`/g)].map((m) => m[1]);
 const allRuns = Object.values(jobs).flatMap((job) => job.steps.map((s) => s.run ?? ""));
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14)", () => {
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, and 15)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -1335,6 +1347,70 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       .split(/\r?\n/)
       .filter((l) => l.trim() !== "");
     expect(leaked, "tracked files matched by the repo's own ignore rules").toEqual([]);
+  });
+
+  // ── drift class 15 — the heartbeat watches itself ─────────────────────────
+  it("drift class 15: the drift-lint heartbeat runs daily, offset from every other schedule", () => {
+    const source = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "drift-lint.yml"), "utf8");
+    const triggers = parseWorkflowTopLevel(source).on as Record<string, unknown>;
+
+    // The pinned daily slot — chosen to share no minute with the nightly
+    // (03:17) or the drill (Mon 04:43), so the three scheduled verdicts
+    // never collide.
+    const schedules = Array.isArray(triggers.schedule) ? (triggers.schedule as Array<{ cron?: string }>) : [];
+    expect(schedules, "exactly one daily schedule").toHaveLength(1);
+    const cron = (schedules[0]?.cron ?? "").replace(/"/g, "");
+    expect(cron, "the pinned daily slot").toBe("23 5 * * *");
+    expect(cron, "cron shape (daily, no day-of-week constraint)").toMatch(/^\d{1,2} \d{1,2} \* \* \*$/);
+    const drillCron =
+      (Array.isArray(drillWorkflowTriggers.schedule)
+        ? (drillWorkflowTriggers.schedule as Array<{ cron?: string }>)[0]?.cron ?? ""
+        : ""
+      ).replace(/"/g, "");
+    expect(cron, "offset from ci.yml's nightly cadence").not.toBe(ciCron.replace(/"/g, ""));
+    expect(cron, "offset from the drill's weekly cadence").not.toBe(drillCron);
+    expect(triggers.workflow_dispatch, "manual dispatch exists").toBeDefined();
+    expect(triggers.push, "pushes are already covered by ci.yml's suite").toBeUndefined();
+  });
+
+  it("drift class 15: the heartbeat runs only the lint file, behind the pure ABI gate", () => {
+    const source = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "drift-lint.yml"), "utf8");
+
+    // Exactly one job, and its test invocation is the filtered lint file —
+    // not the whole suite: the point is a cheap daily verdict, not a
+    // duplicate CI runner. Job ids are matched inside the `jobs:` section
+    // only: trigger keys like `schedule:` share the same two-space indent
+    // under `on:` and would pollute a whole-file match.
+    const jobsAt = source.indexOf("\njobs:");
+    expect(jobsAt, "the workflow has a jobs section").toBeGreaterThan(-1);
+    const jobIds = [...source.slice(jobsAt).matchAll(/^  ([a-z][a-z-]*):\s*$/gm)].map((m) => m[1]);
+    expect(jobIds, "the workflow parses into exactly the documented job").toEqual(["drift-lint"]);
+    const LINT_FILTER = "npm test -- app/renderer/src/__tests__/docsSearchRefs.test.ts";
+    expect(source, "the lint file is invoked through the npm filter").toContain(LINT_FILTER);
+
+    // The suite-wide rebuild must precede the lint: npm ci leaves the
+    // binding on the Electron ABI, and the pure pretest gate would abort
+    // before vitest starts without it.
+    const rebuildAt = source.indexOf("npm run rebuild:node");
+    const lintAt = source.indexOf(LINT_FILTER);
+    expect(rebuildAt, "the ABI rebuild is wired").toBeGreaterThan(-1);
+    expect(rebuildAt, "the rebuild precedes the lint").toBeLessThan(lintAt);
+
+    // The appetite is closed: no other npm run, no e2e, bounded runtime.
+    const npmRuns = [...source.matchAll(/npm run ([a-z:.-]+)/g)].map((m) => m[1]);
+    expect([...new Set(npmRuns)].sort(), "the npm-run appetite is exactly this set").toEqual(["rebuild:node"]);
+    expect(source, "the e2e suite is not part of the heartbeat").not.toContain("test:e2e");
+    expect(source, "bounded runtime").toMatch(/^    timeout-minutes: 10$/m);
+  });
+
+  it("drift class 15: the heartbeat is read-only and cannot touch repo state", () => {
+    const source = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "drift-lint.yml"), "utf8");
+    expect(source, "top-level permissions are read-only").toMatch(/^permissions:\n  contents: read$/m);
+    expect(source.match(/contents: write/g) ?? [], "no write grant anywhere").toHaveLength(0);
+    // Checkout + setup-node are the only actions (the general SHA-pin test
+    // scans this file too; this pins the count so nothing rides along).
+    const uses = [...source.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+    expect(uses.length, "checkout and setup-node only").toBe(2);
   });
 
   // ── drift class 14 — the catalog watches itself ───────────────────────────
