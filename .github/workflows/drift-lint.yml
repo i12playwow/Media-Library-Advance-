@@ -1,0 +1,57 @@
+name: Drift Lint
+
+# The doc-drift lint's own heartbeat. ci.yml runs the whole suite (the lint
+# included) on pushes/PRs and nightly at 03:17, and the drill chains verdicts
+# weekly — but both of those answer to other masters: a nightly run buried in
+# a full suite, a weekly one waiting for Monday. This workflow runs ONLY the
+# lint file (app/renderer/src/__tests__/docsSearchRefs.test.ts, drift
+# classes 2–14) on a daily clock against the tip of the default branch, so
+# doc/config drift that reaches main without a linted push — a ruleset-bypass
+# commit, an admin merge, a GitHub-UI edit whose CI run never started — is
+# caught within a day instead of at the next push. It costs one test file:
+# no e2e, no full suite, a few minutes of runner time.
+#
+# The job mirrors ci.yml's unit job (checkout → setup-node → npm ci →
+# rebuild:node → npm test) with the vitest invocation filtered to the lint
+# file. rebuild:node stays because npm ci's postinstall leaves better-sqlite3
+# on the Electron ABI and the pure pretest gate (verify:abi) would abort
+# before vitest starts; the lint file itself never loads the binding, but
+# the gate's passing proof is what makes "the lint ran green" mean anything.
+
+on:
+  schedule:
+    # Daily, 05:23 UTC — offset from ci.yml's nightly 03:17 and the drill's
+    # Monday 04:43 so the three scheduled verdicts never share a minute.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drift-lint-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  drift-lint:
+    name: Doc-drift lint (scheduled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild better-sqlite3 for Node
+        run: npm run rebuild:node
+
+      - name: Run the doc-drift lint
+        run: npm test -- app/renderer/src/__tests__/docsSearchRefs.test.ts
