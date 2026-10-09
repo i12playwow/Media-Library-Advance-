@@ -140,6 +140,45 @@ npm test                      # prove it
 For the e2e suite you do not heal manually: `npm run test:e2e`'s
 `pretest:e2e` hook rebuilds for Electron first (rule 3).
 
+## Verifying a scheduled fire
+
+The drill fires whether or not anyone watches, but a fire nobody reads
+proves nothing. `verify-drill-fire.mjs` (repo root) is the one-command
+read — `node verify-drill-fire.mjs` checks the latest schedule-triggered
+run, `node verify-drill-fire.mjs --run N` one specific fire — and it
+fails closed, one readable `✗` line per broken claim (the child's own
+stderr already streamed above it), on exactly five things in order:
+
+1. **the date gate** — the first-fire window (Mon 2026-10-05 04:43 UTC,
+   the drill's cron slot) has arrived; `--force-date` rehearses past it
+   and says out loud that a forced run proves nothing about the scheduler;
+2. **the fire is scheduled and green** — the GitHub Actions API shows the
+   target run as `event=schedule`, `status=completed`, `conclusion=success`
+   on its own `head_sha`, and that sha anchors every later check, so
+   nothing is pinned to one week;
+3. **that run's append landed on `origin/main`** — an appender-shaped
+   commit past the fire's tip whose `GUARDS-LOG.md` diff carries the run's
+   own id, so two fires on the same `head_sha` (no pushes between weeks)
+   cannot let last week's append pass this week's check;
+4. **the pull is fast-forward only** — a diverged local main stops the
+   script with a verdict; it force-pushes nothing;
+5. **the chain is intact** — the doc-drift lint runs behind the pure ABI
+   gate (`npm run rebuild:node` first: npm ci leaves the binding on the
+   Electron ABI and `pretest` is a pure gate), and drift class 8's digest
+   recomputation over every `GUARDS-LOG.md` segment *is* the chain verdict.
+   The lint retries once — cold vitest runs on this machine have a
+   documented transient pattern a warm re-run heals.
+
+The script **never dispatches** the drill: a manual run exercises the
+append path but proves nothing about the scheduler — the one thing a
+Monday fire exists to prove. Every cwd-relative operation is anchored to
+the repo the script lives in, so invoking it from any directory behaves
+identically, and every failure is one synchronous line — never a stack
+trace from a failed `execSync`. Drift class 16 keeps this section honest
+in both directions: the flags it teaches are the flags the script parses,
+and the script's date gate and append-commit regex are checked against
+`.github/workflows/drill.yml` itself.
+
 ## CI
 
 CI (`.github/workflows/ci.yml`, Ubuntu) keeps the same contract honest at

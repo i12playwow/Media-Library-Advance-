@@ -138,6 +138,21 @@ import path from "node:path";
 //     write grant, no e2e, no unfiltered suite. Deleting the heartbeat or
 //     quietly widening it into a second full-suite runner fails npm test.
 //
+//   drift class 16 — the scheduled-fire verifier's contract: the
+//     docs/testing.md section that teaches humans to run it sits BEFORE
+//     the CI section (its prose is not ci.yml's citation surface) and
+//     names the script plus both flags it parses; the script's first-fire
+//     window agrees with drill.yml's cron (minute, hour, weekday), its
+//     append-commit regex accepts every `commit -m` message drill.yml
+//     runs, and the pipeline itself is pinned in script source — the
+//     schedule-filtered API proof on the run's own head_sha, the run id
+//     inside the append's diff, the fast-forward-only pull with no push,
+//     rebuild → lint against this very lint file with its one-retry
+//     budget, synchronous one-line failures, repo-root anchoring, exactly
+//     one read-only fetch, and no dispatch path (a manual run proves
+//     nothing about the scheduler). The repo-root script also joins the
+//     class-12 credential scan.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -416,14 +431,20 @@ const appendTokenExpression =
 // private ledger sits outside the scan by construction, and a file enters
 // the public surface only by being committed to it. Two surfaces: the docs
 // (prose leaks) and the workflows + scripts (where a credential pasted
-// into executable config would ride the next push).
+// into executable config would ride the next push). "Scripts" includes
+// the runnable files at the repo root — the drill-fire verifier lives
+// there, and a credential pasted into it rides the next push exactly like
+// one pasted under scripts/.
 const trackedFiles = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" })
   .split(/\r?\n/)
   .map((f) => f.trim())
   .filter((f) => f.length > 0);
 const trackedMdFiles = trackedFiles.filter((f) => f.toLowerCase().endsWith(".md"));
 const trackedWorkflowAndScriptFiles = trackedFiles.filter(
-  (f) => f.startsWith(".github/workflows/") || f.startsWith("scripts/")
+  (f) =>
+    f.startsWith(".github/workflows/") ||
+    f.startsWith("scripts/") ||
+    (!f.includes("/") && /\.(mjs|cjs|js|bat)$/.test(f))
 );
 
 // The app source joins the token scan only — never the email scan: test
@@ -906,7 +927,18 @@ const boldTokens = [...ciSection.matchAll(/\*\*([^*]+)\*\*/g)].map((m) =>
 const citedCommands = [...ciSection.matchAll(/`((?:npm|npx|xvfb-run)[^`]*)`/g)].map((m) => m[1]);
 const allRuns = Object.values(jobs).flatMap((job) => job.steps.map((s) => s.run ?? ""));
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, and 15)", () => {
+// ── drift class 16 data: the scheduled-fire verifier ───────────────────
+// The verifier narrates its own contract in comments (it is a doc-driven
+// tool), so its pins run over comment-stripped source: a claim must sit
+// in code, not prose. The stripper ends a line at `//`, which would also
+// swallow the two URL literals the script builds its API calls from — so
+// the endpoint pin below reads RAW source, deliberately, and nothing
+// else does.
+const verifierRaw = fs.readFileSync(path.join(repoRoot, "verify-drill-fire.mjs"), "utf8");
+const verifierCode = stripLineComments(verifierRaw);
+const verifierDocAt = testingMd.indexOf("## Verifying a scheduled fire");
+
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, and 16)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -1287,6 +1319,10 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       trackedWorkflowAndScriptFiles.length,
       "the workflow/script surface is real"
     ).toBeGreaterThan(10);
+    expect(
+      trackedWorkflowAndScriptFiles,
+      "the repo-root verifier rides the credential scan"
+    ).toContain("verify-drill-fire.mjs");
     expect(hits, "email addresses in committed files").toEqual([]);
   });
 
@@ -1441,6 +1477,108 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       [...catalogClasses].sort((a, b) => a - b),
       "CONTRIBUTING's catalog vs the lint's actual classes"
     ).toEqual([...lintClasses].sort((a, b) => a - b));
+  });
+
+  // ── drift class 16 — the scheduled-fire verifier's contract ──────────────
+  it("drift class 16: testing.md teaches the verifier, and the script parses the flags it teaches (doc → script)", () => {
+    expect(verifierDocAt, "the verifier section exists").toBeGreaterThan(-1);
+    expect(
+      verifierDocAt,
+      "and sits before ## CI — its prose is not ci.yml's citation surface"
+    ).toBeLessThan(testingMd.indexOf("## CI"));
+    const section = testingMd.slice(verifierDocAt, testingMd.indexOf("## CI"));
+    expect(section, "the section names the script").toContain("`verify-drill-fire.mjs`");
+    expect(
+      fs.existsSync(path.join(repoRoot, "verify-drill-fire.mjs")),
+      "the cited script exists at the repo root"
+    ).toBe(true);
+    expect(section, "the section teaches the run selector").toContain("--run");
+    expect(section, "the section teaches the rehearsal bypass").toContain("--force-date");
+    expect(verifierCode, "the script parses --run").toContain('process.argv.indexOf("--run")');
+    expect(verifierCode, "the script parses --force-date").toContain(
+      'process.argv.includes("--force-date")'
+    );
+    expect(section, "the section states the no-dispatch rule").toContain("never dispatches");
+  });
+
+  it("drift class 16: the date gate and append regex stay in lockstep with drill.yml (script → workflow)", () => {
+    // The window must BE the drill's slot: same minute, same hour, same weekday, in UTC.
+    const win = /Date\.UTC\((\d+), (\d+), (\d+), (\d+), (\d+), (\d+)\)/.exec(verifierCode);
+    expect(win, "the first-fire window is a literal Date.UTC").not.toBeNull();
+    const [wy, wmo, wd, wh, wmin] = win!.slice(1).map(Number);
+    const cron = (
+      Array.isArray(drillWorkflowTriggers.schedule)
+        ? (drillWorkflowTriggers.schedule as Array<{ cron?: string }>)[0]?.cron ?? ""
+        : ""
+    ).replace(/"/g, "");
+    const [cMin, cHour, , , cDow] = cron.split(" ");
+    expect(cron.split(" ").length, "the drill's cron parses into five fields").toBe(5);
+    expect([wy, wmo, wd], "the first fire is the documented date (Mon 2026-10-05)").toEqual([
+      2026, 9, 5,
+    ]);
+    expect(String(wmin), "window minute = cron minute").toBe(cMin);
+    expect(String(wh), "window hour = cron hour").toBe(cHour);
+    expect(
+      String(new Date(Date.UTC(wy, wmo, wd)).getUTCDay()),
+      "window weekday = cron weekday"
+    ).toBe(cDow);
+
+    // Every commit line drill.yml runs must pass the verifier's append regex…
+    const reSrc = /const DRILL_COMMIT_RE = \/(.*)\/;/.exec(verifierCode)?.[1];
+    expect(reSrc, "the append-commit regex is a literal").toBeDefined();
+    const appenderRe = new RegExp(reSrc!);
+    const commitMsgs = [...drillWorkflowSource.matchAll(/commit -m "([^"]+)"/g)].map((m) => m[1]);
+    expect(commitMsgs.length, "drill.yml actually commits its summaries").toBeGreaterThan(0);
+    for (const msg of commitMsgs) {
+      expect(
+        appenderRe.test(msg),
+        `the verifier accepts drill.yml's commit message: ${msg}`
+      ).toBe(true);
+    }
+  });
+
+  it("drift class 16: the verification pipeline stays pinned in script source", () => {
+    // Scheduler proof: only schedule-triggered runs count, and only green completed ones,
+    // anchored on the run's own head_sha so no date or sha is pinned to one week.
+    expect(verifierCode, "filters to the schedule event").toContain('r.event === "schedule"');
+    expect(verifierCode, "requires completed").toContain('scheduled.status !== "completed"');
+    expect(verifierCode, "requires success").toContain('scheduled.conclusion !== "success"');
+    expect(verifierCode, "anchors on the run's head_sha").toContain("scheduled.head_sha");
+    expect(verifierCode, "diffs from that tip").toContain("${preTip}..origin/main");
+    // The endpoint literal survives only in raw source (it holds `//`, which the
+    // comment stripper eats) — pinned here for exactly that reason.
+    expect(verifierRaw, "reads the drill's schedule-filtered runs endpoint").toContain(
+      "actions/workflows/drill.yml/runs?event=schedule"
+    );
+    // Read-only: exactly one network call, and no dispatch path exists in code.
+    expect((verifierCode.match(/fetch\(/g) ?? []).length, "one fetch, no dispatch API").toBe(1);
+    expect(verifierCode, "no dispatch endpoint").not.toMatch(
+      /dispatches|workflow_dispatch|method:\s*["']POST/i
+    );
+    // Append proof: this run's own id must be inside the append's diff.
+    expect(verifierCode, "matches the run id in the diff").toContain("runs/${scheduled.id}");
+    // The pull is fast-forward only, and the verifier never pushes.
+    expect(verifierCode, "the pull is fast-forward only").toContain(
+      "git pull --ff-only origin main"
+    );
+    expect(verifierCode, "the verifier never pushes").not.toContain("git push");
+    // rebuild → lint, against this very lint file, with the one-retry budget.
+    const rebuildAt = verifierCode.indexOf("npm run rebuild:node");
+    const lintAt = verifierCode.indexOf("npm test -- ${LINT}");
+    expect(rebuildAt, "rebuild:node wired before the lint").toBeGreaterThan(-1);
+    expect(lintAt, "the lint run is wired").toBeGreaterThan(rebuildAt);
+    expect(
+      /const LINT = "([^"]+)"/.exec(verifierCode)?.[1],
+      "it lints the lint itself"
+    ).toBe(LINT_FILE_REL);
+    expect(verifierCode, "the documented one-retry budget").toContain("attempt <= 2");
+    // Readable failures, synchronous, anchored to the script's own repo.
+    expect(verifierCode, "synchronous verdict write").toContain("fs.writeSync(2");
+    expect(verifierCode, "named-check wrapper").toContain("const runOr =");
+    expect(verifierCode, "anchored to its own repo").toContain("cwd: repoRoot");
+    expect(verifierCode, "repo root from import.meta.url").toContain(
+      "fileURLToPath(import.meta.url)"
+    );
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────

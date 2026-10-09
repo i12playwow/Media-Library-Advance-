@@ -5,7 +5,7 @@ name: Drift Lint
 # weekly — but both of those answer to other masters: a nightly run buried in
 # a full suite, a weekly one waiting for Monday. This workflow runs ONLY the
 # lint file (app/renderer/src/__tests__/docsSearchRefs.test.ts, drift
-# classes 2–14) on a daily clock against the tip of the default branch, so
+# classes 2–16) on a daily clock against the tip of the default branch, so
 # doc/config drift that reaches main without a linted push — a ruleset-bypass
 # commit, an admin merge, a GitHub-UI edit whose CI run never started — is
 # caught within a day instead of at the next push. It costs one test file:
