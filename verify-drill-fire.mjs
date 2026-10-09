@@ -5,9 +5,9 @@
 // What "verified" means here, in order:
 //   1. The window arrived (date gate; bypass with --force-date only for
 //      rehearsal — a forced run cannot prove the scheduler).
-//   2. Drill #12 fired as a SCHEDULED event, green, with an append commit
-//      on origin/main past the pre-fire tip (checked in the browser by the
-//      human; the git side is authoritative below).
+//   2. Drill #12 fired as a SCHEDULED event, green, on the pre-fire tip —
+//      proven machine-side against the GitHub Actions API (event, status,
+//      conclusion, head_sha), with the run URL printed for human eyeball.
 //   3. The append commit landed on origin/main past 75e0058 with the drill
 //      appender's exact message shape.
 //   4. The pull is a fast-forward only — a non-ff result is reported and
@@ -30,7 +30,9 @@ import fs from "node:fs";
 const PRE_FIRE_TIP = "75e0058"; // last push before the first scheduled fire (run #12's head_sha)
 const WINDOW_UTC = Date.UTC(2026, 9, 5, 4, 43, 0); // Mon 2026-10-05 04:43:00Z
 const DRILL_COMMIT_RE = /^chore\(guards\): scheduled drill summaries chained into GUARDS-LOG$/;
-const DRILL_PAGE = "https://github.com/i12playwow/Media-Library-Advance-/actions/workflows/drill.yml";
+const REPO = "i12playwow/Media-Library-Advance-";
+const DRILL_PAGE = `https://github.com/${REPO}/actions/workflows/drill.yml`;
+const DRILL_RUNS_API = `https://api.github.com/repos/${REPO}/actions/workflows/drill.yml/runs?event=schedule&per_page=20`;
 
 const force = process.argv.includes("--force-date");
 const run = (cmd, opts = {}) => execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], ...opts });
@@ -48,10 +50,35 @@ if (now.getTime() < WINDOW_UTC && !force) {
 }
 if (force) console.log("(--force-date: bypassing the date gate — rehearsal, NOT scheduler proof)");
 
-// ── 2. Human-side browser check reminder ───────────────────────────────────
-step("Drill #12 scheduled-event check (browser, human-verified)");
-console.log(`Confirm at ${DRILL_PAGE} that a run labeled "Scheduled" completed successfully.`);
-console.log("(The git checks below are authoritative for the append + chain; this one is for the scheduler itself.)");
+// ── 2. Scheduler proof via the GitHub API ──────────────────────────────────
+step("Drill #12 scheduled-event check (GitHub Actions API)");
+const apiHeaders = {
+  Accept: "application/vnd.github+json",
+  "User-Agent": "verify-drill-fire",
+  "X-GitHub-Api-Version": "2022-11-28",
+};
+const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+if (ghToken) apiHeaders.Authorization = `Bearer ${ghToken}`;
+let scheduled;
+try {
+  const res = await fetch(DRILL_RUNS_API, { headers: apiHeaders });
+  if (!res.ok) {
+    fail(`GitHub API answered ${res.status} ${res.statusText} for the drill's scheduled runs — scheduler proof unavailable.`);
+  }
+  const runs = (await res.json()).workflow_runs ?? [];
+  scheduled = runs.find((r) => String(r.head_sha ?? "").startsWith(PRE_FIRE_TIP));
+  if (!scheduled) {
+    fail(`No schedule-triggered drill run found on ${PRE_FIRE_TIP} (checked ${runs.length} scheduled run(s)) — the fire this script verifies does not exist. ${DRILL_PAGE}`);
+  }
+} catch (e) {
+  fail(`GitHub API unreachable — scheduler proof unavailable (${e?.message ?? e}).`);
+}
+if (scheduled.event !== "schedule" || scheduled.status !== "completed" || scheduled.conclusion !== "success") {
+  fail(`Scheduled run ${scheduled.id} is event=${scheduled.event} status=${scheduled.status} conclusion=${scheduled.conclusion} — not a green scheduled fire. ${scheduled.html_url}`);
+}
+console.log(`Scheduled run green: ${scheduled.html_url}`);
+console.log(`  run #${scheduled.run_number}, event ${scheduled.event}, head ${String(scheduled.head_sha).slice(0, 7)}, ${scheduled.created_at} → ${scheduled.updated_at} (status=${scheduled.status})`);
+console.log(`(Optional human eyeball: ${DRILL_PAGE})`);
 
 // ── 3. Fetch + append-commit check ─────────────────────────────────────────
 step("Fetch + confirm the append commit landed past " + PRE_FIRE_TIP);
