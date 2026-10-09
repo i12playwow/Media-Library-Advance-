@@ -141,17 +141,19 @@ import path from "node:path";
 //   drift class 16 — the scheduled-fire verifier's contract: the
 //     docs/testing.md section that teaches humans to run it sits BEFORE
 //     the CI section (its prose is not ci.yml's citation surface) and
-//     names the script plus both flags it parses; the script's first-fire
-//     window agrees with drill.yml's cron (minute, hour, weekday), its
-//     append-commit regex accepts every `commit -m` message drill.yml
-//     runs, and the pipeline itself is pinned in script source — the
-//     schedule-filtered API proof on the run's own head_sha, the run id
-//     inside the append's diff, the fast-forward-only pull with no push,
-//     rebuild → lint against this very lint file with its one-retry
-//     budget, synchronous one-line failures, repo-root anchoring, exactly
-//     one read-only fetch, and no dispatch path (a manual run proves
-//     nothing about the scheduler). The repo-root script also joins the
-//     class-12 credential scan.
+//     names the script plus every flag it parses; the `verify:drill` npm
+//     alias routes to the script; the script's first-fire window agrees
+//     with drill.yml's cron (minute, hour, weekday), its append-commit
+//     regex accepts every `commit -m` message drill.yml runs, and the
+//     pipeline itself is pinned in script source — the schedule-filtered
+//     API proof on the run's own head_sha, the run id inside the append's
+//     diff, the fast-forward-only pull with no push, rebuild → lint
+//     against this very lint file with its one-retry budget, synchronous
+//     one-line failures, repo-root anchoring, exactly one read-only fetch,
+//     no dispatch path (a manual run proves nothing about the scheduler),
+//     and the trend leg (`--history N`, default 3) that fails closed when
+//     a green fire's append never landed. The repo-root script also joins
+//     the class-12 credential scan.
 //
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
@@ -1579,6 +1581,30 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(verifierCode, "repo root from import.meta.url").toContain(
       "fileURLToPath(import.meta.url)"
     );
+  });
+
+  it("drift class 16: the npm alias routes to the verifier and the trend leg stays pinned", () => {
+    expect(scripts["verify:drill"], "the npm alias runs the repo-root verifier").toBe(
+      "node verify-drill-fire.mjs"
+    );
+    expect(
+      fs.existsSync(path.join(repoRoot, "verify-drill-fire.mjs")),
+      "the alias target exists"
+    ).toBe(true);
+    expect(verifierDocAt, "the verifier section exists for the alias check").toBeGreaterThan(-1);
+    const section = testingMd.slice(verifierDocAt, testingMd.indexOf("## CI"));
+    expect(section, "the doc teaches the npm alias").toContain("npm run verify:drill");
+    expect(section, "the doc teaches the trend window flag").toContain("--history");
+    expect(verifierCode, "the trend window flag is parsed").toContain(
+      'process.argv.indexOf("--history")'
+    );
+    expect(verifierCode, "the trend window slices the schedule list").toContain(
+      "schedules.slice(0, historyN)"
+    );
+    expect(verifierCode, "a green fire missing its append fails closed").toContain(
+      "Trend regression:"
+    );
+    expect(verifierCode, "non-green fires are context only").toContain("not green (status=");
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────

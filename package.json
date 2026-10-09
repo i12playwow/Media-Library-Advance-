@@ -12,6 +12,7 @@
     "rebuild:electron": "node scripts/rebuild-electron.cjs",
     "verify:abi": "node scripts/abi-check.cjs",
     "verify:abi:electron": "node scripts/abi-check.cjs --electron",
+    "verify:drill": "node verify-drill-fire.mjs",
     "diagnose:abi": "node scripts/diagnose-abi.cjs",
     "drill:abi": "node scripts/drill-abi-contract.cjs",
     "probe:tamper": "node scripts/tamper-probe.cjs",

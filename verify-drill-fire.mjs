@@ -2,7 +2,8 @@
 // verify-drill-fire.mjs — one-command verification of a scheduled drill
 // fire (cron `43 4 * * 1` in .github/workflows/drill.yml). Default target:
 // the LATEST schedule-triggered run; `--run N` selects a specific drill run
-// number (any fire after #12, and #12 itself).
+// number (any fire after #12, and #12 itself); `--history N` widens the
+// trend window (default 3) that re-proves the append across recent fires.
 //
 // What "verified" means here, in order:
 //   1. The first-fire window (Mon 2026-10-05 04:43 UTC) has arrived — the
@@ -18,6 +19,12 @@
 //      own id in its GUARDS-LOG diff — two fires on the same head_sha (no
 //      pushes between weeks) must not let last week's append pass this
 //      week's check.
+//   3b. The same append proof repeats across the last `--history N`
+//      scheduled fires (default 3): a single latest-fire check cannot see
+//      an older week whose append never landed, so a GREEN fire missing
+//      its append prints a ✗ trend line (with its run url) and fails the
+//      run. Non-green fires are reported as context only — the chain
+//      cannot owe evidence for a fire that never went green.
 //   4. The pull is a fast-forward only — a non-ff result is reported and
 //      the script stops rather than force-anything.
 //   5. The doc-drift lint (its class 8 recomputes every GUARDS-LOG segment
@@ -79,6 +86,13 @@ if (runFlagIdx !== -1 && (!Number.isInteger(wantRun) || wantRun < 1)) {
   fail("--run needs a positive integer drill run number, e.g. --run 13");
 }
 
+// `--history N` widens the trend window; default = the last 3 scheduled fires.
+const historyFlagIdx = process.argv.indexOf("--history");
+const historyN = historyFlagIdx === -1 ? 3 : Number.parseInt(process.argv[historyFlagIdx + 1] ?? "", 10);
+if (!Number.isInteger(historyN) || historyN < 1) {
+  fail("--history needs a positive integer fire window, e.g. --history 5");
+}
+
 // ── 1. Date gate ────────────────────────────────────────────────────────────
 const now = new Date();
 if (now.getTime() < WINDOW_UTC && !force) {
@@ -99,12 +113,13 @@ const apiHeaders = {
 const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 if (ghToken) apiHeaders.Authorization = `Bearer ${ghToken}`;
 let scheduled;
+let schedules = [];
 try {
   const res = await fetch(DRILL_RUNS_API, { headers: apiHeaders });
   if (!res.ok) {
     fail(`GitHub API answered ${res.status} ${res.statusText} for the drill's scheduled runs — scheduler proof unavailable.`);
   }
-  const schedules = ((await res.json()).workflow_runs ?? []).filter((r) => r.event === "schedule");
+  schedules = ((await res.json()).workflow_runs ?? []).filter((r) => r.event === "schedule");
   scheduled = wantRun ? schedules.find((r) => r.run_number === wantRun) : schedules[0];
   if (!scheduled) {
     fail(wantRun
@@ -151,6 +166,47 @@ if (!appendCommit) {
 }
 const appendSha = appendCommit.split("\t")[0].slice(0, 7);
 console.log(`Append commit present: ${appendSha} — ${commits.length} commit(s) past ${preTip.slice(0, 7)}, run #${scheduled.run_number} line confirmed in its diff`);
+
+// ── 3b. Trend: the same append proof across the last N fires ───────────────
+// A single green fire can hide an older hole: if an earlier week's append
+// never landed, this week's append still satisfies step 3. The trend repeats
+// the check across the newest `--history N` scheduled fires (default 3) so a
+// gap is visible as a line; any GREEN fire missing its append fails the run.
+// Non-green fires are context only — the chain cannot owe evidence for a
+// fire that never went green.
+step(`Trend: the last ${historyN} scheduled fire(s)`);
+const trendWindow = schedules.slice(0, historyN); // newest first
+let greenFires = 0;
+let greenLanded = 0;
+for (const fire of [...trendWindow].reverse()) {
+  const label = `run #${fire.run_number} (${String(fire.created_at).slice(0, 10)}, head ${String(fire.head_sha).slice(0, 7)})`;
+  const green = fire.event === "schedule" && fire.status === "completed" && fire.conclusion === "success";
+  if (!green) {
+    console.log(`  ⚠ ${label} — not green (status=${fire.status}, conclusion=${fire.conclusion}); context only`);
+    continue;
+  }
+  greenFires++;
+  const head = String(fire.head_sha ?? "");
+  if (head.length < 7) fail(`Scheduled run #${fire.run_number} reports no usable head_sha — cannot anchor the trend.`);
+  const range = runOr("git log (trend range)", `git log --format=%H%x09%s ${head}..origin/main`).trim();
+  const candidates = range
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => l.split("\t"))
+    .filter(([, subject]) => DRILL_COMMIT_RE.test(subject ?? ""));
+  let landed = null;
+  for (const [sha] of candidates) {
+    const patch = runOr("git show (trend append diff)", `git show --format= --unified=0 ${sha} -- GUARDS-LOG.md`);
+    if (patch.includes(`runs/${fire.id}`)) { landed = sha.slice(0, 7); break; }
+  }
+  if (!landed) {
+    console.log(`  ✗ ${label} — green fire, but no append referencing it ever landed past ${head.slice(0, 7)}`);
+    fail(`Trend regression: scheduled run #${fire.run_number} (id ${fire.id}) is green, yet its append is missing from origin/main — the chain has that week's evidence missing. Check ${fire.html_url}`);
+  }
+  greenLanded++;
+  console.log(`  ✓ ${label} — append ${landed}`);
+}
+console.log(`Trend: ${greenLanded}/${greenFires} green fire(s) in the window have their own append landed (${trendWindow.length} of ${schedules.length} scheduled fire(s) on record).`);
 
 // ── 4. Fast-forward-only pull ──────────────────────────────────────────────
 step("Pull --ff-only");
@@ -201,5 +257,5 @@ try {
 }
 console.log(logTail);
 
-console.log("\n✓ ALL CHECKS PASSED — drill run #" + scheduled.run_number + " landed and the chain is intact.");
+console.log("\n✓ ALL CHECKS PASSED — drill run #" + scheduled.run_number + " landed, every green fire in the last " + trendWindow.length + "-fire window has its append, and the chain is intact.");
 console.log("Record in the private ledger: Drill #" + scheduled.run_number + " Scheduled, append commit " + appendSha + ", " + testsLine + ".");
