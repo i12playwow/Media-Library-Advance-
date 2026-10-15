@@ -146,7 +146,7 @@ The drill fires whether or not anyone watches, but a fire nobody reads
 proves nothing. `npm run verify:drill` — a one-line wrapper around
 `verify-drill-fire.mjs` at the repo root, which also runs directly — is
 the one-command read: it checks the latest schedule-triggered run, `--run N`
-picks one specific fire, `--history N` widens the trend window (default 3),
+picks one specific fire, `--history N` widens the trend window (default 3), `--output json` prints the verdict as one machine-readable JSON document on stdout (human diagnostics move to stderr; the document is valid on the green, red, and pre-fire paths, and the red path names the broken check in its `failure` field, so the trend can be charted across weeks by JSON-fluent tooling),
 and it fails closed, one readable `✗` line per broken claim (the child's
 own stderr already streamed above it), on five things in order:
 
@@ -179,7 +179,7 @@ Monday fire exists to prove. Every cwd-relative operation is anchored to
 the repo the script lives in, so invoking it from any directory behaves
 identically, and every failure is one synchronous line — never a stack
 trace from a failed `execSync`. Drift class 16 keeps this section honest
-in both directions: the flags it teaches (`--run`, `--history`,
+in both directions: the flags it teaches (`--run`, `--history`, `--output`,
 `--force-date`) are the flags the script parses, the `verify:drill` npm
 alias is pinned to the script, the trend leg's window and fail-closed rule
 are pinned in script source, and the script's date gate and append-commit
@@ -198,7 +198,11 @@ requests. The e2e job fires on a nightly schedule (plus manual dispatch),
 so dependency drift is caught without burning its minutes on every push —
 and ABI-sensitive pull requests can run it on demand by adding the
 `run-e2e` label: the label-gated caller (pr-e2e.yml, pull_request_target)
-then invokes this same job against the PR's merge ref. Its concurrency
+then invokes this same job against the PR's merge ref. The caller passes
+**no secrets** to that call — PR-derived code executes there (the e2e
+suite is the PR's own test code), so repo secrets must never be
+available to it, and the e2e job needs none: its webhook alert step
+skips quietly when the secret is unset. Its concurrency
 group is per-event, so a scheduled run can never cancel an in-progress
 push run. Every external action is pinned to a commit SHA (the guards
 table in CONTRIBUTING promises this; the lint enforces it across every

@@ -3,7 +3,10 @@
 // fire (cron `43 4 * * 1` in .github/workflows/drill.yml). Default target:
 // the LATEST schedule-triggered run; `--run N` selects a specific drill run
 // number (any fire after #12, and #12 itself); `--history N` widens the
-// trend window (default 3) that re-proves the append across recent fires.
+// trend window (default 3) that re-proves the append across recent fires;
+// `--output json` serves the same verdict as one JSON document on stdout
+// (human diagnostics move to stderr) — valid on both the green and the red
+// path so the trend can be charted across weeks by JSON-fluent tooling.
 //
 // What "verified" means here, in order:
 //   1. The first-fire window (Mon 2026-10-05 04:43 UTC) has arrived — the
@@ -62,10 +65,36 @@ const force = process.argv.includes("--force-date");
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const run = (cmd, opts = {}) => execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], cwd: repoRoot, ...opts });
 
-const step = (msg) => console.log(`\n== ${msg}`);
+// ── 0. JSON mode (--output json), the doc, and human-output helpers ────────
+// The doc gathers evidence as steps execute; in JSON mode it is the run's
+// single stdout payload on BOTH paths (green, red, and the early-exit skip),
+// so stdout always parses standalone — human chatter (== headers, the parse
+// fallback lines, the child processes' streamed stderr) goes to stderr only,
+// and on the red path the ✗ line lands before the document is written.
+const outputFlagIdx = process.argv.indexOf("--output");
+const outputMode = outputFlagIdx === -1 ? "text" : (process.argv[outputFlagIdx + 1] ?? "");
+if (outputFlagIdx !== -1 && outputMode !== "json" && outputMode !== "text") {
+  console.error("✗ --output takes json or text, e.g. --output json");
+  process.exit(1);
+}
+const jsonMode = outputMode === "json";
+const doc = { verdict: null, failure: null, generated_at: null, target: null, trend: [], lint: null, guards_log_tail: null, chain_tip: null };
+const emitDoc = () => {
+  doc.generated_at = new Date().toISOString();
+  fs.writeSync(1, JSON.stringify(doc, null, 2) + "\n");
+};
+
+const step = (msg) => { if (!jsonMode) console.log(`\n== ${msg}`); };
+const human = (msg) => { if (!jsonMode) console.log(msg); };
 // fs.writeSync(2, …): process.exit() can drop an async stderr write when
 // stderr is a pipe (POSIX), which would lose the one line saying what failed.
-const fail = (msg) => { fs.writeSync(2, `\n✗ ${msg}\n`); process.exit(1); };
+const fail = (msg) => {
+  // The red path names the failure inside the document too — a bare
+  // "fail" tells charting tooling nothing about which leg broke.
+  if (jsonMode && doc.verdict == null) { doc.verdict = "fail"; doc.failure = msg; emitDoc(); }
+  fs.writeSync(2, `\n✗ ${msg}\n`);
+  process.exit(1);
+};
 // Run a command as a named check. The child's stderr is inherited (already
 // visible above the ✗ line), so on failure the only thing missing without
 // this wrapper is the context — an uncaught execSync throw would print its
@@ -97,11 +126,12 @@ if (!Number.isInteger(historyN) || historyN < 1) {
 const now = new Date();
 if (now.getTime() < WINDOW_UTC && !force) {
   const h = ((WINDOW_UTC - now.getTime()) / 3600000).toFixed(1);
-  console.log(`Window not arrived: ${now.toISOString()} — first scheduled fire is Mon 2026-10-05 04:43 UTC (~${h}h away).`);
-  console.log("Nothing to verify yet. Re-run on/after Monday 11:43 local (allow scheduler-delay hours), or rehearse with --force-date.");
+  human(`Window not arrived: ${now.toISOString()} — first scheduled fire is Mon 2026-10-05 04:43 UTC (~${h}h away).`);
+  human("Nothing to verify yet. Re-run on/after Monday 11:43 local (allow scheduler-delay hours), or rehearse with --force-date.");
+  if (jsonMode) { doc.verdict = "skipped"; emitDoc(); }
   process.exit(0);
 }
-if (force) console.log("(--force-date: bypassing the date gate — rehearsal, NOT scheduler proof)");
+if (force) human("(--force-date: bypassing the date gate — rehearsal, NOT scheduler proof)");
 
 // ── 2. Scheduler proof via the GitHub API ──────────────────────────────────
 step("Scheduled-event check (GitHub Actions API)");
@@ -136,9 +166,17 @@ const preTip = String(scheduled.head_sha ?? "");
 if (preTip.length < 7) {
   fail(`Scheduled run #${scheduled.run_number} reports no usable head_sha — cannot anchor the git check.`);
 }
-console.log(`Drill run #${scheduled.run_number} green: ${scheduled.html_url}`);
-console.log(`  event ${scheduled.event}, head ${preTip.slice(0, 7)}, ${scheduled.created_at} → ${scheduled.updated_at} (status=${scheduled.status})`);
-console.log(`(Optional human eyeball: ${DRILL_PAGE})`);
+human(`Drill run #${scheduled.run_number} green: ${scheduled.html_url}`);
+human(`  event ${scheduled.event}, head ${preTip.slice(0, 7)}, ${scheduled.created_at} → ${scheduled.updated_at} (status=${scheduled.status})`);
+human(`(Optional human eyeball: ${DRILL_PAGE})`);
+doc.target = {
+  run: scheduled.run_number,
+  run_id: scheduled.id,
+  url: scheduled.html_url,
+  head_sha: preTip.slice(0, 7),
+  conclusion: scheduled.conclusion,
+  append_commit: null,
+};
 
 // ── 3. Fetch + append-commit check ─────────────────────────────────────────
 step(`Fetch + confirm run #${scheduled.run_number}'s append landed past ${preTip.slice(0, 7)}`);
@@ -165,7 +203,8 @@ if (!appendCommit) {
   fail(`An appender-shaped commit exists past ${preTip.slice(0, 7)}, but none references scheduled run #${scheduled.run_number} (id ${scheduled.id}) — run #${scheduled.run_number}'s append has not landed (check again later).`);
 }
 const appendSha = appendCommit.split("\t")[0].slice(0, 7);
-console.log(`Append commit present: ${appendSha} — ${commits.length} commit(s) past ${preTip.slice(0, 7)}, run #${scheduled.run_number} line confirmed in its diff`);
+doc.target.append_commit = appendSha;
+human(`Append commit present: ${appendSha} — ${commits.length} commit(s) past ${preTip.slice(0, 7)}, run #${scheduled.run_number} line confirmed in its diff`);
 
 // ── 3b. Trend: the same append proof across the last N fires ───────────────
 // A single green fire can hide an older hole: if an earlier week's append
@@ -181,8 +220,19 @@ let greenLanded = 0;
 for (const fire of [...trendWindow].reverse()) {
   const label = `run #${fire.run_number} (${String(fire.created_at).slice(0, 10)}, head ${String(fire.head_sha).slice(0, 7)})`;
   const green = fire.event === "schedule" && fire.status === "completed" && fire.conclusion === "success";
+  const trendEntry = {
+    run: fire.run_number,
+    run_id: fire.id,
+    created_at: fire.created_at,
+    head_sha: String(fire.head_sha ?? "").slice(0, 7),
+    conclusion: fire.conclusion,
+    green,
+    verified: false,
+    append_sha: null,
+  };
   if (!green) {
-    console.log(`  ⚠ ${label} — not green (status=${fire.status}, conclusion=${fire.conclusion}); context only`);
+    doc.trend.push(trendEntry);
+    human(`  ⚠ ${label} — not green (status=${fire.status}, conclusion=${fire.conclusion}); context only`);
     continue;
   }
   greenFires++;
@@ -200,13 +250,17 @@ for (const fire of [...trendWindow].reverse()) {
     if (patch.includes(`runs/${fire.id}`)) { landed = sha.slice(0, 7); break; }
   }
   if (!landed) {
-    console.log(`  ✗ ${label} — green fire, but no append referencing it ever landed past ${head.slice(0, 7)}`);
+    doc.trend.push(trendEntry);
+    human(`  ✗ ${label} — green fire, but no append referencing it ever landed past ${head.slice(0, 7)}`);
     fail(`Trend regression: scheduled run #${fire.run_number} (id ${fire.id}) is green, yet its append is missing from origin/main — the chain has that week's evidence missing. Check ${fire.html_url}`);
   }
   greenLanded++;
-  console.log(`  ✓ ${label} — append ${landed}`);
+  trendEntry.verified = true;
+  trendEntry.append_sha = landed;
+  doc.trend.push(trendEntry);
+  human(`  ✓ ${label} — append ${landed}`);
 }
-console.log(`Trend: ${greenLanded}/${greenFires} green fire(s) in the window have their own append landed (${trendWindow.length} of ${schedules.length} scheduled fire(s) on record).`);
+human(`Trend: ${greenLanded}/${greenFires} green fire(s) in the window have their own append landed (${trendWindow.length} of ${schedules.length} scheduled fire(s) on record).`);
 
 // ── 4. Fast-forward-only pull ──────────────────────────────────────────────
 step("Pull --ff-only");
@@ -215,7 +269,7 @@ try {
 } catch {
   fail("Pull is not a fast-forward — local main diverged from origin. Resolve by hand; this script force-pushes nothing.");
 }
-console.log(`Local main is now ${runOr("git rev-parse", "git rev-parse --short HEAD").trim()}`);
+human(`Local main is now ${runOr("git rev-parse", "git rev-parse --short HEAD").trim()}`);
 
 // ── 5. Chain verdict via the drift lint ────────────────────────────────────
 step("Rebuild better-sqlite3 for Node (the pretest gate needs the Node ABI)");
@@ -230,7 +284,7 @@ for (let attempt = 1; attempt <= 2; attempt++) {
     break;
   } catch (e) {
     if (attempt === 1) {
-      console.log("Lint run 1 failed — known cold-run transient pattern on this machine; retrying once…");
+      human("Lint run 1 failed — known cold-run transient pattern on this machine; retrying once…");
       continue;
     }
     fail("Lint failed twice: the chain is NOT verified. Inspect the failing tests (class 8 = digest recompute) before touching GUARDS-LOG.");
@@ -242,9 +296,10 @@ for (let attempt = 1; attempt <= 2; attempt++) {
 // (the fallback below points "above").
 const lintClean = lintOut.replace(/\u001b\[[0-9;]*m/g, "");
 const summaryLines = lintClean.split("\n").filter((l) => /^\s*(Test Files|Tests)\s/.test(l));
-console.log(summaryLines.length ? summaryLines.join("\n") : "(no test summary found in lint output)");
+if (summaryLines.length) human(summaryLines.join("\n"));
 const testsLine = lintClean.match(/Tests\s+\d+\s+passed/g)?.pop() ?? "(test summary not parsed — see the lint output above)";
-console.log(`Lint verdict: ${testsLine}`);
+doc.lint = { tests_line: testsLine.trim() };
+human(`Lint verdict: ${testsLine}`);
 
 // ── 6. GUARDS-LOG tip, for the ledger ──────────────────────────────────────
 step("GUARDS-LOG tail (chain evidence for the ledger)");
@@ -255,7 +310,12 @@ try {
 } catch (e) {
   fail(`Cannot read ${logPath} (${e?.code ?? e?.message ?? e}) — is this script still inside its repo?`);
 }
-console.log(logTail);
+doc.guards_log_tail = logTail.trimEnd().split("\n");
+doc.chain_tip = /- chain: ([0-9a-f]{64}) /.exec(logTail)?.[1] ?? null;
+human(logTail);
 
-console.log("\n✓ ALL CHECKS PASSED — drill run #" + scheduled.run_number + " landed, every green fire in the last " + trendWindow.length + "-fire window has its append, and the chain is intact.");
-console.log("Record in the private ledger: Drill #" + scheduled.run_number + " Scheduled, append commit " + appendSha + ", " + testsLine + ".");
+doc.verdict = "pass";
+if (jsonMode) emitDoc();
+human("");
+human(`✓ ALL CHECKS PASSED — drill run #${scheduled.run_number} landed, every green fire in the last ${trendWindow.length}-fire window has its append, and the chain is intact.`);
+human(`Record in the private ledger: Drill #${scheduled.run_number} Scheduled, append commit ${appendSha}, ${testsLine}.`);

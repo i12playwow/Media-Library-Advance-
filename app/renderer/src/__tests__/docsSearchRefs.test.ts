@@ -1129,7 +1129,15 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(prSource, "merge ref passed through").toContain(
       "refs/pull/${{ github.event.pull_request.number }}/merge"
     );
-    expect(prSource, "secrets flow to the reusable job").toContain("secrets: inherit");
+    // Fail-closed: pull_request_target executes the PR's own test code on
+    // the merge ref, so repo secrets must never reach the reusable call.
+    // The e2e job needs none (the webhook step skips when unset).
+    expect(prSource, "no secrets flow to a PR-derived run").not.toContain(
+      "secrets: inherit"
+    );
+    expect(prSource, "the no-secrets rule is stated in the file itself").toContain(
+      "No secrets are inherited"
+    );
   });
 
   it("every workflow action is SHA-pinned (the SLSA generator's tag is the documented exception)", () => {
@@ -1605,6 +1613,27 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       "Trend regression:"
     );
     expect(verifierCode, "non-green fires are context only").toContain("not green (status=");
+    expect(verifierCode, "the JSON output mode is parsed").toContain(
+      'process.argv.indexOf("--output")'
+    );
+    expect(verifierCode, "per-fire trend entries land in the JSON doc").toContain(
+      "doc.trend.push"
+    );
+    expect(verifierCode, "the doc is written synchronously in JSON mode").toContain(
+      "fs.writeSync(1"
+    );
+    // The red path must name the failure inside the document, so a chart
+    // of weekly verdicts shows why a week went red, not just that it did.
+    expect(verifierCode, "the red path records the failure reason").toContain(
+      'doc.verdict = "fail"; doc.failure = msg'
+    );
+    expect(verifierCode, "the doc shape reserves the failure field").toContain(
+      "verdict: null, failure: null"
+    );
+    expect(verifierCode, "the pre-fire skip path still emits its verdict").toContain(
+      'doc.verdict = "skipped"'
+    );
+    expect(section, "the doc teaches --output json").toContain("--output json");
   });
 
   // ── drift class 4 — search.md's write-path table ↔ database.ts ────────────
