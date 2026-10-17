@@ -124,7 +124,7 @@ must fail when the code stops honoring it.**
 
 > Scope note: after a checkout lost the original lint file, the recreated
 > `docsSearchRefs.test.ts` is layer 1 entire — **drift classes 2, 3, 4, 5, 6,
-> 7, 8, 9, 10, 11, 12, 13, 14, 15, and 16** live there (class 14 keeps this very
+> 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, and 17** live there (class 14 keeps this very
 > catalog in sync with the lint's actual class set), each named in the test
 > list and catalogued in the file's header. Extend the lint — don't retire it.
 
@@ -149,18 +149,16 @@ to `scripts/drill-abi-contract.cjs` (legs 1–8 plus the R1–R2 restore).
 | The committed guards log stays parseable and tamper-evident: the latest entry matches the drill's leg catalog, every CI summary line is well-formed, and every chained segment — entry or absorbed CI batch — digests every byte before it, with the log always ending on a chain line, and the digest algorithm pinned identically across drill writer, CI appender, refill, the settings service, and lint | `GUARDS-LOG.md` (its header) | drift class 8: entry skeleton, metadata line, per-leg rows, CI-line format, hash-chain verification, tip invariant, closed line vocabulary, digest-algorithm structural pins | every local `npm run drill:abi` (which chains its own append) plus the append-log job, whose chained lines must pass the same lint |
 | Doc/config drift reaching main without a linted push is caught within a day by a dedicated heartbeat | `.github/workflows/drift-lint.yml` | drift class 15: the daily cron is pinned exactly and stays offset from the nightly and the drill, the job runs only the lint file behind the pure ABI gate, and the workflow stays read-only with no e2e and no unfiltered suite | the dispatched heartbeat run itself; the drift-lint job on every push through CI's unit job |
 | A scheduled fire that nobody read still fails open — unless one command proves it ran, was green, appended, chained, and that recent fires did too | docs/testing.md (Verifying a scheduled fire), `verify-drill-fire.mjs`, `npm run verify:drill` | drift class 16: the doc section sits before the CI citation surface and names the flags the script parses; the `verify:drill` npm alias routes to the script; the date gate agrees with drill.yml's cron, the append-commit regex accepts drill.yml's own `commit -m` messages, the trend leg (`--history N`, default 3) fails closed when a green fire's append is missing, and the pipeline (schedule-filtered API proof on the run's `head_sha`, run id inside the append diff, ff-only pull with no push, rebuild → lint against the lint file itself, synchronous failure lines, one read-only fetch, no dispatch) is pinned in script source; the repo-root script joins class 12's credential scan | the verifier itself after every fire — `npm run verify:drill` (`--run N` for one specific fire, `--history N` for the trend window) |
+| A test's environment matches what it loads: no DOM-environment test reaches an external package through `require()` | vite.config.ts (test environment default), each test file's `@vitest-environment` directive | drift class 17: the environment set is discovered, not hardcoded; bare package specifiers and `new Function("require", …)` fail under a DOM environment while Node builtins and relative modules stay allowed; the detector is self-tested | every `npm test` runs the lint |
 | Every cited path, filename, identifier, anchor, npm script, and README badge exists; every workflow action is SHA-pinned; every script is documented somewhere | all five policed docs | the lint's citation checks (paths, scripts, workflow shapes) | every `npm test`, locally and in CI's unit job |
 
 ## Releases
 
-A release is a tag plus a `gh release create vX.Y.Z --target main`. That
-fires `.github/workflows/generator-generic-ossf-slsa3-publish.yml`, which
-packages the Windows installer natively on a Windows runner, attaches it to
-the release, and signs SLSA v3 provenance over its sha256 (builder ref
-`@v2.1.0` — the generator rejects non-tag refs, the one lint-sanctioned
-exception to SHA pinning). The repo is private, so the provenance skips the
-public Rekor log (`private-repository: true`); it remains verifiable against
-the workflow's OIDC identity with slsa-verifier.
+A release is a tag plus a `gh release create vX.Y.Z --target main`. Nothing
+fires on release: the SLSA provenance generator shipped as an unfilled
+template (placeholder artifacts, no real build wired in), so it was removed
+rather than left dormant. Every action across the remaining workflows is
+pinned to a full commit SHA with no exceptions.
 
 Read the last two columns as different kinds of evidence: the push-time
 column stops a drift from merging; the runs column is the proof that the

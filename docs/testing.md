@@ -206,8 +206,7 @@ skips quietly when the secret is unset. Its concurrency
 group is per-event, so a scheduled run can never cancel an in-progress
 push run. Every external action is pinned to a commit SHA (the guards
 table in CONTRIBUTING promises this; the lint enforces it across every
-workflow file), with the SLSA generator's version tag as the one
-documented exception. Dependabot keeps those pins current: its weekly
+workflow file). Dependabot keeps those pins current: its weekly
 github-actions stream reads each pin's version comment and opens one
 grouped PR that moves the SHA and its comment together, and the lint
 holds every new pin to the same full-SHA standard.
