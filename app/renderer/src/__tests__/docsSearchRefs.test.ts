@@ -1,6 +1,13 @@
+// @vitest-environment node
+// This lint is pure Node work (fs, child_process, string parsing). It must
+// NOT run under happy-dom: resolving playwright.config.ts require()s
+// @playwright/test, and happy-dom serves module files from its own virtual
+// origin (localhost:3000) via a child process with no request error handler,
+// which sprays an unhandled ECONNREFUSED into the suite output.
 import { describe, expect, it } from "vitest";
 import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { builtinModules } from "node:module";
 import path from "node:path";
 
 // docsSearchRefs.test.ts — the doc-drift lint (CONTRIBUTING.md layer 1,
@@ -154,6 +161,21 @@ import path from "node:path";
 //     and the trend leg (`--history N`, default 3) that fails closed when
 //     a green fire's append never landed. The repo-root script also joins
 //     the class-12 credential scan.
+//
+//   drift class 17 — a test's environment must match what it loads: a file
+//     running under a DOM environment (the vite.config.ts default, unless
+//     it declares `@vitest-environment node`) may not require() a bare
+//     package specifier, nor hand the require shim to `new Function`.
+//     happy-dom answers such a require by fetching the module file from
+//     its own virtual origin (http://localhost:3000) in a child process
+//     that attaches no request error handler, so the child dies with an
+//     unhandled ECONNREFUSED — printed into the suite log while the suite
+//     stays green. That is exactly how this lint's own Playwright-config
+//     resolution sprayed a crash across green runs before it moved to the
+//     Node environment. Node builtins and relative modules stay allowed;
+//     the environment set is discovered from each file's directive and
+//     the configured default, never hardcoded, and the detector is
+//     self-tested so it cannot go silently inert.
 //
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
@@ -940,7 +962,61 @@ const verifierRaw = fs.readFileSync(path.join(repoRoot, "verify-drill-fire.mjs")
 const verifierCode = stripLineComments(verifierRaw);
 const verifierDocAt = testingMd.indexOf("## Verifying a scheduled fire");
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, and 16)", () => {
+// ── drift class 17 data: test environments vs. what each test loads ────────
+// A DOM test environment (happy-dom, jsdom) is not just a document stub: it
+// serves module files from its own virtual origin. When a test require()s an
+// external package, happy-dom answers by spawning a child `node -e` that GETs
+// http://localhost:3000/<absolute module path>. Nothing listens there, and the
+// spawned client never attaches a request 'error' handler, so the child dies
+// with an unhandled ECONNREFUSED — printed into the suite log, invisible to the
+// exit code, leaving `npm test` green. The trigger is the require() itself, so
+// that is what this class bans in any non-Node environment: builtins and
+// relative modules resolve in the worker and stay allowed, bare package
+// specifiers do not.
+const DEFAULT_TEST_ENV = ((): string => {
+  const m = /\benvironment:\s*"([^"]+)"/.exec(
+    fs.readFileSync(path.join(repoRoot, "vite.config.ts"), "utf8")
+  );
+  if (!m) throw new Error("vite.config.ts no longer declares test.environment");
+  return m[1];
+})();
+
+const testFilePaths = trackedFiles
+  .filter((f) => f.startsWith("app/renderer/src/__tests__/") && /\.test\.tsx?$/.test(f))
+  .sort();
+
+// Vitest reads the directive from the file's leading docblock, so only the
+// header is searched. Without one, the configured default environment applies.
+function testEnvironmentOf(relPath: string): string {
+  const head = fs
+    .readFileSync(path.join(repoRoot, relPath), "utf8")
+    .split(/\r?\n/)
+    .slice(0, 10)
+    .join("\n");
+  return /@vitest-environment\s+(\S+)/.exec(head)?.[1] ?? DEFAULT_TEST_ENV;
+}
+
+// Builtin detection comes from Node itself rather than a hand-kept list, so
+// both `require("fs")` and `require("node:fs")` stay allowed as Node grows.
+const BUILTIN_MODULES = new Set(builtinModules);
+
+function isExternalSpecifier(spec: string): boolean {
+  if (spec.startsWith(".") || spec.startsWith("/")) return false;
+  if (spec.startsWith("node:")) return false;
+  return !BUILTIN_MODULES.has(spec);
+}
+
+// A fresh regex per call: a /g literal reused across calls would carry
+// lastIndex between scans and silently skip matches.
+function externalRequiresIn(code: string): string[] {
+  const out: string[] = [];
+  for (const m of code.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) {
+    if (isExternalSpecifier(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, and 17)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -1140,18 +1216,12 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     );
   });
 
-  it("every workflow action is SHA-pinned (the SLSA generator's tag is the documented exception)", () => {
+  it("every workflow action is SHA-pinned", () => {
     const workflowsDir = path.join(repoRoot, ".github", "workflows");
     const files = fs.readdirSync(workflowsDir).filter((f) => f.endsWith(".yml"));
     expect(files.length, "the repo's workflows are all scanned").toBeGreaterThanOrEqual(3);
 
     const shaRe = /^[0-9a-f]{40}$/;
-    // CONTRIBUTING's Releases section documents this one exception: the
-    // SLSA generator rejects non-tag refs, so its version tag is sanctioned.
-    // The exact tag may move (Dependabot bumps it), so the exception is the
-    // sanctioned path at any version — anchored, not a blanket prefix pass.
-    const slsaException =
-      /^slsa-framework\/slsa-github-generator\/.github\/workflows\/generator_generic_slsa3\.yml@v\d+\.\d+\.\d+$/;
 
     for (const file of files) {
       const source = fs.readFileSync(path.join(workflowsDir, file), "utf8");
@@ -1159,7 +1229,6 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       expect(uses.length, `${file} declares actions`).toBeGreaterThan(0);
       for (const ref of uses) {
         if (ref.startsWith("./")) continue; // local reusable workflow
-        if (slsaException.test(ref)) continue;
         const pin = ref.slice(ref.lastIndexOf("@") + 1);
         expect(
           shaRe.test(pin),
@@ -2310,6 +2379,52 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(layer2).toContain(
       "proves the postinstall state directly, and then lets `pretest:e2e` re-heal"
     );
+  });
+
+  // ── drift class 17 — a test's environment must match what it loads ───────
+  it("drift class 17: no DOM-environment test loads an external package through require", () => {
+    // The surface is discovered, never hardcoded: every renderer test file,
+    // with its environment taken from its own directive or the config default.
+    expect(testFilePaths.length, "the renderer test surface is discoverable").toBeGreaterThan(5);
+    const domFiles = testFilePaths.filter((f) => testEnvironmentOf(f) !== "node");
+    expect(domFiles.length, "DOM-environment tests exist, so this rule is not vacuous").toBeGreaterThan(0);
+
+    const violations: string[] = [];
+    for (const file of domFiles) {
+      const code = stripLineComments(fs.readFileSync(path.join(repoRoot, file), "utf8"));
+      for (const spec of externalRequiresIn(code)) violations.push(`${file}: require("${spec}")`);
+      // The same trap by another door: evaluating code with the require shim
+      // in scope is how the class's incident actually reached the package.
+      if (/new Function\(\s*["']require["']/.test(code)) {
+        violations.push(`${file}: new Function("require", …)`);
+      }
+    }
+    expect(
+      violations,
+      `external require() under a DOM environment (${DEFAULT_TEST_ENV} default) reaches ` +
+        `happy-dom's virtual origin, whose child process dies on ECONNREFUSED without ` +
+        `failing the suite: ${violations.join(" | ") || "none"}`
+    ).toEqual([]);
+  });
+
+  it("drift class 17: the incident's file runs on Node, and the detector still bites", () => {
+    // The regression pin: this lint was the file that tripped the trap by
+    // resolving playwright.config.ts, which require()s @playwright/test.
+    expect(
+      testEnvironmentOf("app/renderer/src/__tests__/docsSearchRefs.test.ts"),
+      "the lint runs on Node"
+    ).toBe("node");
+    // A detector that matches nothing would pass the scan above silently, so
+    // its verdicts on known shapes are pinned: a bare package is external; a
+    // node: builtin, a bare builtin, and a relative module are not.
+    expect(isExternalSpecifier("@playwright/test"), "a bare package is external").toBe(true);
+    expect(isExternalSpecifier("node:fs"), "a node: builtin is not external").toBe(false);
+    expect(isExternalSpecifier("fs"), "a bare builtin is not external").toBe(false);
+    expect(isExternalSpecifier("../components/MovieTile"), "a relative module is not external").toBe(false);
+    expect(
+      externalRequiresIn('const { defineConfig } = require("@playwright/test");'),
+      "the scan finds an external require in source"
+    ).toEqual(["@playwright/test"]);
   });
 
   // ── drift class 10 — the lint watches itself ──────────────────────────────
