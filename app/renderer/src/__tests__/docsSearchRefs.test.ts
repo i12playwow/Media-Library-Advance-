@@ -177,6 +177,16 @@ import path from "node:path";
 //     the configured default, never hardcoded, and the detector is
 //     self-tested so it cannot go silently inert.
 //
+//   drift class 18 — the suite's log stays free of experimental Node APIs:
+//     no file under app/renderer/src/__tests__/ (setup.ts included) or
+//     tests/ may call node:module's stripTypeScriptTypes, whose every use
+//     prints an ExperimentalWarning into the run — the Playwright-config
+//     loader used to, once per `npm test`. The scan reads comment-stripped
+//     source, so prose may still name the API; the needle is assembled from
+//     two fragments so this file's own guard never matches itself; and the
+//     detector is self-tested against a real call and a lookalike, so it
+//     cannot go silently inert.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -200,10 +210,16 @@ const LEG_LABELS = [
 
 // Resolve playwright.config.ts with the given environment — proving what
 // the config *does*, not what it says. The file is ESM-flavored TypeScript
-// in a CommonJS package, so require() cannot load it directly: strip the
+// in a CommonJS package, so require() cannot load it directly: erase the
 // types, translate the one named import and one default export the file is
 // allowed to have, and evaluate the rest verbatim. Anything beyond that
 // shape fails loudly rather than silently asserting nothing.
+//
+// The erasure is TypeScript's own transpiler (module: ESNext, so the ESM
+// shape above survives for the rewrites). It is the compiler `tsc -b`
+// already runs, it reports syntax errors instead of evaluating half a file,
+// and — unlike node:module's stripTypeScriptTypes — it prints no
+// ExperimentalWarning into the suite log on every `npm test`.
 function resolvePlaywrightConfig(env: NodeJS.ProcessEnv) {
   const savedEnv = process.env;
   // Each scenario starts from a CLEAN slate: the ambient environment must
@@ -213,10 +229,32 @@ function resolvePlaywrightConfig(env: NodeJS.ProcessEnv) {
   // is the whole truth about the environment being simulated.
   process.env = { ...env };
   try {
-    const { stripTypeScriptTypes } = require("node:module");
-    const js = stripTypeScriptTypes(
-      fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8")
-    )
+    const ts = require("typescript");
+    const transpiled = ts.transpileModule(
+      fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8"),
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ES2022,
+          // Erase types only — never elide imports. Unused value imports are
+          // dropped by default, which would hide a second import from the
+          // shape guard below; verbatimModuleSyntax keeps the import graph
+          // exactly as written, and requires type-only imports to say so.
+          verbatimModuleSyntax: true
+        },
+        reportDiagnostics: true,
+        fileName: "playwright.config.ts"
+      }
+    );
+    // A config that no longer parses fails here, by name, rather than half
+    // evaluating and asserting something weaker than the file intends.
+    if ((transpiled.diagnostics ?? []).length > 0) {
+      throw new Error(
+        "playwright.config.ts no longer transpiles cleanly: " +
+          ts.flattenDiagnosticMessageText(transpiled.diagnostics[0].messageText, " ")
+      );
+    }
+    const js = transpiled.outputText
       .replace(/^\s*import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];?\s*$/m,
         (_m: string, names: string, from: string) => `const {${names}} = require("${from}");`)
       .replace(/^\s*export\s+default\s+/m, "module.exports.default = ");
@@ -1016,7 +1054,28 @@ function externalRequiresIn(code: string): string[] {
   return out;
 }
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, and 17)", () => {
+// ── drift class 18 data: experimental-API hygiene across test source ───────
+// The run's log is part of its output contract: a warning that fires on every
+// `npm test` teaches people to skim past warnings, and the one this class
+// guards — node:module's stripTypeScriptTypes — is exactly what the
+// Playwright-config loader used before TypeScript's transpiler replaced it.
+// Scope is every vitest suite file (setup.ts included) plus the Playwright
+// specs. Comments are stripped before scanning, so prose may name the API;
+// strings are not stripped, so the test title describes it in words instead
+// of spelling it. The needle is assembled from two fragments so this file's
+// own guard cannot match itself — the same fragment trick class 8 uses for
+// its hash atoms.
+const EXPERIMENTAL_TYPE_STRIP_API = "stripType" + "ScriptTypes";
+const EXPERIMENTAL_API_RE = new RegExp(EXPERIMENTAL_TYPE_STRIP_API);
+const suiteSourcePaths = trackedFiles
+  .filter(
+    (f) =>
+      (f.startsWith("app/renderer/src/__tests__/") && /\.[jt]sx?$/.test(f)) ||
+      (f.startsWith("tests/") && /\.[jt]sx?$/.test(f))
+  )
+  .sort();
+
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, and 18)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     expect(scripts.pretest).toBe("npm run verify:abi");
@@ -2425,6 +2484,39 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       externalRequiresIn('const { defineConfig } = require("@playwright/test");'),
       "the scan finds an external require in source"
     ).toEqual(["@playwright/test"]);
+  });
+
+  // ── drift class 18 — the suite's log stays free of experimental APIs ─────
+  it("drift class 18: no test source calls Node's experimental type-stripping API", () => {
+    // The surface is discovered from git, never listed: the vitest suite
+    // (setup.ts included) and every Playwright spec, with this lint itself
+    // inside the scanned set so the file that once tripped it stays covered.
+    expect(suiteSourcePaths.length, "the suite's source files are discoverable").toBeGreaterThan(5);
+    expect(suiteSourcePaths, "the file this guard was born from is scanned").toContain(LINT_FILE_REL);
+    // Both groups must survive the filter: losing tests/ would leave ten
+    // vitest files and still pass a bare count, silently un-covering e2e.
+    expect(
+      suiteSourcePaths.some((f) => f.startsWith("tests/")),
+      "the Playwright specs are scanned too"
+    ).toBe(true);
+
+    const offenders = suiteSourcePaths.filter((file) =>
+      EXPERIMENTAL_API_RE.test(stripLineComments(fs.readFileSync(path.join(repoRoot, file), "utf8")))
+    );
+    expect(
+      offenders,
+      `test source calling the experimental API, which prints an ExperimentalWarning on every run: ` +
+        `${offenders.join(" | ") || "none"}`
+    ).toEqual([]);
+
+    // Self-test: a detector that matches nothing would pass the scan above
+    // while the warning came back, so a real call is caught and a lookalike
+    // is not. Both probe strings are bound first — the lint's own class-10
+    // check rejects expect() on a bare literal.
+    const realCall = `require("node:module").${EXPERIMENTAL_TYPE_STRIP_API}("const x = 1;")`;
+    const lookalike = 'require("node:module").stripScriptTypes';
+    expect(EXPERIMENTAL_API_RE.test(realCall), "the API name is caught").toBe(true);
+    expect(EXPERIMENTAL_API_RE.test(lookalike), "a lookalike is not caught").toBe(false);
   });
 
   // ── drift class 10 — the lint watches itself ──────────────────────────────
