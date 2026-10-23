@@ -140,6 +140,29 @@ npm test                      # prove it
 For the e2e suite you do not heal manually: `npm run test:e2e`'s
 `pretest:e2e` hook rebuilds for Electron first (rule 3).
 
+## Setup doctor
+
+`npm run doctor` covers the failure neither ABI gate can see: a `node_modules`
+that exists but has lost its native executables. An interrupted install leaves
+esbuild's platform package an empty shell and `electron/dist` half-extracted;
+`npm test` then dies while loading `vite.config.ts` with a message about the
+esbuild platform, and the e2e suite never launches — neither symptom mentions
+the binding, so the ABI scripts have nothing to diagnose.
+
+```bash
+npm run doctor            # detect and repair; exit 0 only if both run
+npm run doctor -- --check # detect only, exit 1 when unhealthy
+```
+
+The repair re-runs only what the packages own: esbuild's installer (then
+`npm rebuild esbuild` as a fallback), and Electron's installer followed — when
+it leaves a locales-only `dist` behind, which a partial extraction on Node 26
+can do — by extracting the cached release zip with the platform's archive
+tool and restoring `path.txt`. The better-sqlite3 binding is never touched, so
+a repaired tree keeps its ABI state: an Electron-ABI checkout stays
+Electron-ABI, and `npm run rebuild:node` is still the way to make it
+unit-ready.
+
 ## Verifying a scheduled fire
 
 The drill fires whether or not anyone watches, but a fire nobody reads
