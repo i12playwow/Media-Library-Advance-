@@ -20,6 +20,7 @@ import { LibraryPage } from "./components/LibraryPage";
 import { SearchPage } from "./components/SearchPage";
 import { DuplicateResolutionModal } from "./components/DuplicateResolutionModal";
 import { MovieTile } from "./components/MovieTile";
+import { PlayerPopup } from "./components/PlayerPopup";
 import { PlayerPage } from "./components/PlayerPage";
 import { PinPromptDialog } from "./components/PinPromptDialog";
 import { ScanOptionsDialog } from "./components/ScanOptionsDialog";
@@ -61,6 +62,10 @@ export function App() {
   const [appState, setAppState] = useState<AppShellState | null>(null);
   const [activePage, setActivePage] = useState<AppPage>("home");
   const [statusMessage, setStatusMessage] = useState("Preparing local library...");
+  // Floating popup that hosts the built-in player (see PlayerPopup). Opening
+  // a movie from the context menu pops the player up here instead of
+  // navigating away to the full player page.
+  const [playerPopupOpen, setPlayerPopupOpen] = useState(false);
   const [showScanOptionsPrompt, setShowScanOptionsPrompt] = useState(false);
   const [pendingScanMode, setPendingScanMode] = useState<LibraryMode>("normal");
   const [showPinPrompt, setShowPinPrompt] = useState(false);
@@ -425,6 +430,89 @@ export function App() {
     return <div className="loading-shell">Booting MLA+ desktop shell...</div>;
   }
 
+  const playerPopupMovie =
+    allMoviesPool.find((movie) => movie.id === playerMovieId) ??
+    movies.find((movie) => movie.id === playerMovieId) ??
+    null;
+
+  function handleClosePlayerPopup(): void {
+    videoRef.current?.pause();
+    setPlayerMovieId(null);
+    setPlayerFileUrl("");
+    setPlayerPopupOpen(false);
+  }
+
+  // Quick-play from a library tile: same flow as the context menu's
+  // "Open in built-in player" — load the movie and pop the player up.
+  function handlePlayMovieFromLibrary(movie: MovieRecord): void {
+    void loadMovieIntoPlayer(movie);
+    setPlayerPopupOpen(true);
+  }
+
+  // The player element is mounted exactly once — either as the full page
+  // (activePage === "player") or inside the floating popup below. Rendering
+  // it in two places would duplicate the <video> element and its refs.
+  const playerPageElement = (
+    <PlayerPage
+      movies={movies}
+      allMoviesPool={allMoviesPool}
+      playerMovieId={playerMovieId}
+      videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+      playerContainerRef={playerContainerRef as React.RefObject<HTMLElement>}
+      playerConfigRef={playerConfigRef as React.RefObject<HTMLElement>}
+      playerFileUrl={playerFileUrl}
+      playerPlaying={playerPlaying}
+      playerMuted={playerMuted}
+      playerVolume={playerVolume}
+      playerRate={playerRate}
+      playerCurrentTime={playerCurrentTime}
+      playerDuration={playerDuration}
+      playerPlaybackError={playerPlaybackError}
+      playerIsFullscreen={playerIsFullscreen}
+      playerSettings={playerSettings}
+      playerShowConfig={playerShowConfig}
+      playerShowMovieList={playerShowMovieList}
+      playerHoveredMovieId={playerHoveredMovieId}
+      playerShowSubPanel={playerShowSubPanel}
+      playerSubTrackUrl={playerSubTrackUrl}
+      playerSubTrackLang={playerSubTrackLang}
+      playerSubTargetLang={playerSubTargetLang}
+      playerSubtitles={playerSubtitles}
+      playerSubSearching={playerSubSearching}
+      playerSubHasSearched={playerSubHasSearched}
+      playerSubDownloadingId={playerSubDownloadingId}
+      setPlayerPlaying={setPlayerPlaying}
+      setPlayerMuted={setPlayerMuted}
+      setPlayerVolume={setPlayerVolume}
+      setPlayerRate={setPlayerRate}
+      setPlayerCurrentTime={setPlayerCurrentTime}
+      setPlayerDuration={setPlayerDuration}
+      setPlayerPlaybackError={setPlayerPlaybackError}
+      setPlayerSettings={setPlayerSettings}
+      setPlayerShowConfig={setPlayerShowConfig}
+      setPlayerShowMovieList={setPlayerShowMovieList}
+      setPlayerHoveredMovieId={setPlayerHoveredMovieId}
+      setPlayerShowSubPanel={setPlayerShowSubPanel}
+      setPlayerSubTrackUrl={setPlayerSubTrackUrl}
+      setPlayerSubTargetLang={setPlayerSubTargetLang}
+      setPlayerSubtitles={setPlayerSubtitles}
+      setPlayerSubHasSearched={setPlayerSubHasSearched}
+      loadMovieIntoPlayer={loadMovieIntoPlayer}
+      navigatePlaylist={navigatePlaylist}
+      applySubtitle={applySubtitle}
+      handleSearchSubtitles={handleSearchSubtitles}
+      handleDownloadSubtitle={handleDownloadSubtitle}
+      convertMovieToMp4={convertMovieToMp4}
+      pendingRestorePositionRef={pendingRestorePositionRef}
+      handlePlaybackTimeUpdate={handlePlaybackTimeUpdate}
+      handlePlaybackEnded={handlePlaybackEnded}
+      playerSaveSettings={async (s) => { await desktopApi?.playerSaveSettings(s); }}
+      playerDownloadSubtitleFile={async (url) => desktopApi?.playerDownloadSubtitle(url) ?? null}
+      playerOpenFile={async (filePath) => { await desktopApi?.openFile(filePath); }}
+      playerShowInFolder={async (filePath) => { await desktopApi?.showInFolder(filePath); }}
+    />
+  );
+
   return (
     <div className="app-shell">
       <AppSidebar
@@ -487,6 +575,7 @@ export function App() {
             handleBatchMove={handleBatchMove}
             loadMoreMovies={loadMoreMovies}
             PAGE_SIZE={PAGE_SIZE}
+            onPlayMovie={handlePlayMovieFromLibrary}
           />
         )}
 
@@ -564,66 +653,7 @@ export function App() {
         />
       )}
 
-        {activePage === "player" && (
-          <PlayerPage
-            movies={movies}
-            allMoviesPool={allMoviesPool}
-            playerMovieId={playerMovieId}
-            videoRef={videoRef as React.RefObject<HTMLVideoElement>}
-            playerContainerRef={playerContainerRef as React.RefObject<HTMLElement>}
-            playerConfigRef={playerConfigRef as React.RefObject<HTMLElement>}
-            playerFileUrl={playerFileUrl}
-            playerPlaying={playerPlaying}
-            playerMuted={playerMuted}
-            playerVolume={playerVolume}
-            playerRate={playerRate}
-            playerCurrentTime={playerCurrentTime}
-            playerDuration={playerDuration}
-            playerPlaybackError={playerPlaybackError}
-            playerIsFullscreen={playerIsFullscreen}
-            playerSettings={playerSettings}
-            playerShowConfig={playerShowConfig}
-            playerShowMovieList={playerShowMovieList}
-            playerHoveredMovieId={playerHoveredMovieId}
-            playerShowSubPanel={playerShowSubPanel}
-            playerSubTrackUrl={playerSubTrackUrl}
-            playerSubTrackLang={playerSubTrackLang}
-            playerSubTargetLang={playerSubTargetLang}
-            playerSubtitles={playerSubtitles}
-            playerSubSearching={playerSubSearching}
-            playerSubHasSearched={playerSubHasSearched}
-            playerSubDownloadingId={playerSubDownloadingId}
-            setPlayerPlaying={setPlayerPlaying}
-            setPlayerMuted={setPlayerMuted}
-            setPlayerVolume={setPlayerVolume}
-            setPlayerRate={setPlayerRate}
-            setPlayerCurrentTime={setPlayerCurrentTime}
-            setPlayerDuration={setPlayerDuration}
-            setPlayerPlaybackError={setPlayerPlaybackError}
-            setPlayerSettings={setPlayerSettings}
-            setPlayerShowConfig={setPlayerShowConfig}
-            setPlayerShowMovieList={setPlayerShowMovieList}
-            setPlayerHoveredMovieId={setPlayerHoveredMovieId}
-            setPlayerShowSubPanel={setPlayerShowSubPanel}
-            setPlayerSubTrackUrl={setPlayerSubTrackUrl}
-            setPlayerSubTargetLang={setPlayerSubTargetLang}
-            setPlayerSubtitles={setPlayerSubtitles}
-            setPlayerSubHasSearched={setPlayerSubHasSearched}
-            loadMovieIntoPlayer={loadMovieIntoPlayer}
-            navigatePlaylist={navigatePlaylist}
-            applySubtitle={applySubtitle}
-            handleSearchSubtitles={handleSearchSubtitles}
-            handleDownloadSubtitle={handleDownloadSubtitle}
-            convertMovieToMp4={convertMovieToMp4}
-            pendingRestorePositionRef={pendingRestorePositionRef}
-            handlePlaybackTimeUpdate={handlePlaybackTimeUpdate}
-            handlePlaybackEnded={handlePlaybackEnded}
-            playerSaveSettings={async (s) => { await desktopApi?.playerSaveSettings(s); }}
-            playerDownloadSubtitleFile={async (url) => desktopApi?.playerDownloadSubtitle(url) ?? null}
-            playerOpenFile={async (filePath) => { await desktopApi?.openFile(filePath); }}
-            playerShowInFolder={async (filePath) => { await desktopApi?.showInFolder(filePath); }}
-          />
-        )}
+        {activePage === "player" && playerPageElement}
 
         {activePage === "settings" && (
           <SettingsPage
@@ -655,6 +685,15 @@ export function App() {
           />
         )}
       </main>
+
+      {activePage !== "player" && playerPopupOpen && playerMovieId && (
+        <PlayerPopup
+          title={playerPopupMovie?.title ?? ""}
+          onClose={handleClosePlayerPopup}
+        >
+          {playerPageElement}
+        </PlayerPopup>
+      )}
 
       {showScanOptionsPrompt && (
         <ScanOptionsDialog
@@ -696,7 +735,7 @@ export function App() {
           onClose={() => setContextMenu(null)}
           onOpenInPlayer={() => {
             void loadMovieIntoPlayer(contextMenu.movie);
-            setActivePage("player");
+            setPlayerPopupOpen(true);
             setContextMenu(null);
           }}
           onOpenExternal={() => { void desktopApi?.openFile(contextMenu.movie.sourcePath); setContextMenu(null); }}
