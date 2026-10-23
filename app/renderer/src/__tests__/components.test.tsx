@@ -582,6 +582,25 @@ describe("MovieTile", () => {
     );
     expect((container.firstChild as HTMLElement).className).toContain("active");
   });
+
+  // The quick-play button sits dead centre on the poster, so a right-click
+  // aimed at the tile lands on it. It must not swallow the context-menu event,
+  // or the tile's menu becomes unreachable from the middle of the poster.
+  it("bubbles a right-click on the play button up to the tile's menu", () => {
+    const onContextMenu = vi.fn();
+    render(
+      <MovieTile
+        movie={makeMovie({ title: "Great Film" })}
+        isActive={false}
+        isSelected={false}
+        onClick={() => {}}
+        onContextMenu={onContextMenu}
+        onPlay={() => {}}
+      />
+    );
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Play Great Film" }));
+    expect(onContextMenu).toHaveBeenCalledTimes(1);
+  });
 })
 
 // ---------------------------------------------------------------------------

@@ -58,7 +58,8 @@ function MovieTileComponent({
             event.stopPropagation();
             onPlay();
           }}
-          onContextMenu={(event) => event.stopPropagation()}
+          // Right-click is not a play action: let it bubble so the tile's own
+          // context menu opens even when the pointer is over this button.
           onMouseDown={(event) => event.stopPropagation()}
           title="Play"
           type="button"

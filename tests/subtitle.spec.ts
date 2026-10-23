@@ -33,7 +33,9 @@ test("Subtitle search is auto-filled with the detected DVD ID and stays editable
 
     await tile.click({ button: "right" });
     await page.getByRole("button", { name: "Open in built-in player" }).click();
-    await expect(page.getByText("Zeta Feature", { exact: true })).toBeVisible();
+    // The player opens in a floating popup over the still-mounted library, so
+    // the movie title appears in (and is asserted on) the popup header.
+    await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
 
     await page.getByRole("button", { name: "Subtitles" }).click();
 
