@@ -28,7 +28,7 @@ export const defaultScanOptions: ScanAutomationOptions = {
   importOnlyCompleteVideos: true,
   importBetterQuality: true,
   autoResolveDuplicates: false,
-  moveRename: false,
+  moveRename: true,
   copyToLibrary: false,
   scanAllSubfolders: true,
   resolveLongPath: true,

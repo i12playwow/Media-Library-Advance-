@@ -101,6 +101,16 @@ export function ScanOptionsDialog({
           <div className="scan-options-grid">
             <label className="toggle-field">
               <input
+                checked={scanOptionsDraft.moveRename}
+                onChange={(e) => onChangeScanOption("moveRename", e.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                Move and rename files into library folders (uncheck to import in place — no files are moved)
+              </span>
+            </label>
+            <label className="toggle-field">
+              <input
                 checked={scanOptionsDraft.importOnlyCompleteVideos}
                 onChange={(e) => onChangeScanOption("importOnlyCompleteVideos", e.target.checked)}
                 type="checkbox"

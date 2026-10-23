@@ -17,10 +17,12 @@ import {
   writeMovieNfo
 } from "./libraryLayout";
 import { moveFile } from "./fileService";
+import { fetchSubtitleCatResults } from "./subtitleCat";
 import type {
   DuplicateFile,
   DuplicateGroup,
   MetadataSettings,
+  OnlineSubtitleResult,
   LibraryMode,
   LibraryRoots,
   OrganizationSettings,
@@ -571,11 +573,15 @@ async function applyProcessingOptions(params: {
     params.libraryMode === "gentle"
       ? params.organizationSettings.gentleLibraryPath
       : params.organizationSettings.normalLibraryPath;
-  const targetRoot = workspaceRoot.trim() || params.root;
-  // Always organize: rename + move into structured library folders
-  const needsOrganizedPlacement = true;
+  const targetRoot = (workspaceRoot ?? "").trim() || params.root;
+  // Organize (rename + move into structured library folders) only when the
+  // scan's move/rename option is on. With moveRename=false the import is
+  // in-place: videos and matched subtitles stay exactly where they are, and
+  // no .nfo sidecars or conversions touch the source folder.
+  const needsOrganizedPlacement = params.scanOptions.moveRename;
 
   if (
+    needsOrganizedPlacement &&
     params.scanOptions.autoConvertToMp4 &&
     path.extname(currentVideoPath).toLowerCase() !== ".mp4"
   ) {
@@ -689,40 +695,44 @@ async function applyProcessingOptions(params: {
     currentSubtitles = movedSubtitles;
   }
 
-  // Write .nfo sidecar for all library modes
-  if (needsOrganizedPlacement) {
-    // Only fetch from SubtitleCat when no local subtitle was matched and moved.
-    if (
-      params.scanOptions.autoDownloadSubtitleFromSubtitleCat &&
-      params.videoId &&
-      currentSubtitles.length === 0
-    ) {
-      try {
-        const downloadedSubtitle = await downloadBestSubtitleFromSubtitleCat({
-          directory: currentFolderPath,
-          title: params.title,
-          year: params.year,
-          videoId: params.videoId,
-          actresses: params.actresses,
-          modelName: params.modelName,
-          preferredLanguage: params.scanOptions.preferredSubtitleLanguage,
-          resolveLongPath: params.scanOptions.resolveLongPath,
-          organizationSettings: params.organizationSettings
-        });
-        if (downloadedSubtitle && downloadedSubtitle.subtitle) {
-          currentSubtitles.push(downloadedSubtitle.subtitle);
-          subtitleSearchLog = downloadedSubtitle.matchedQuery === params.videoId
-            ? `SubtitleCat matched using video ID "${downloadedSubtitle.matchedQuery}".`
-            : `SubtitleCat matched using fallback query "${downloadedSubtitle.matchedQuery}".`;
-        }
-      } catch (e) {
-        // Ignore subtitle download errors
+  // Fetch from SubtitleCat when no local subtitle was matched. Runs in both
+  // placement modes: organized scans name the file from the library template,
+  // in-place scans name it after the video file so the next rescan's
+  // auto-match finds it instead of downloading again.
+  if (
+    params.scanOptions.autoDownloadSubtitleFromSubtitleCat &&
+    params.videoId &&
+    currentSubtitles.length === 0
+  ) {
+    try {
+      const downloadedSubtitle = await downloadBestSubtitleFromSubtitleCat({
+        directory: currentFolderPath,
+        title: params.title,
+        year: params.year,
+        videoId: params.videoId,
+        actresses: params.actresses,
+        modelName: params.modelName,
+        preferredLanguage: params.scanOptions.preferredSubtitleLanguage,
+        resolveLongPath: params.scanOptions.resolveLongPath,
+        organizationSettings: params.organizationSettings,
+        inPlaceVideoPath: needsOrganizedPlacement ? null : currentVideoPath
+      });
+      if (downloadedSubtitle && downloadedSubtitle.subtitle) {
+        currentSubtitles.push(downloadedSubtitle.subtitle);
+        subtitleSearchLog = downloadedSubtitle.matchedQuery === params.videoId
+          ? `SubtitleCat matched using video ID "${downloadedSubtitle.matchedQuery}".`
+          : `SubtitleCat matched using fallback query "${downloadedSubtitle.matchedQuery}".`;
       }
+    } catch (e) {
+      // Ignore subtitle download errors
     }
   }
 
-  try {
-    await writeMovieNfo({
+  // Write .nfo sidecar only for organized placements — in-place scans must
+  // not drop template-named sidecar files into untouched source folders.
+  if (needsOrganizedPlacement) {
+    try {
+      await writeMovieNfo({
       directory: currentFolderPath,
       libraryMode: params.libraryMode,
       title: params.title,
@@ -731,15 +741,18 @@ async function applyProcessingOptions(params: {
       actresses: params.actresses,
       modelName: params.modelName,
       sourcePath: currentVideoPath,
-      organizationSettings: params.organizationSettings
-    });
-  } catch (error) {
-    warnings.push(`NFO write failed: ${formatError(error)}`);
+        organizationSettings: params.organizationSettings
+      });
+    } catch (error) {
+      warnings.push(`NFO write failed: ${formatError(error)}`);
+    }
   }
 
-  await cleanupDirectory(originalVideoDirectory);
-  for (const subtitle of params.subtitles) {
-    await cleanupDirectory(path.dirname(subtitle.path));
+  if (needsOrganizedPlacement) {
+    await cleanupDirectory(originalVideoDirectory);
+    for (const subtitle of params.subtitles) {
+      await cleanupDirectory(path.dirname(subtitle.path));
+    }
   }
 
   return {
@@ -776,6 +789,10 @@ async function downloadBestSubtitleFromSubtitleCat(params: {
   preferredLanguage: SubtitleLanguagePreference;
   resolveLongPath: boolean;
   organizationSettings: OrganizationSettings;
+  /** When set, the subtitle is written next to this video and named after it
+   *  (the in-place, no-move scan mode) instead of being placed by the
+   *  organization template. */
+  inPlaceVideoPath: string | null;
 }): Promise<DownloadedSubtitleResult | null> {
   const searchQueries = buildSubtitleSearchQueries(params.videoId, params.title);
   const { query: matchedQuery, results } = await fetchSubtitleCatResultsForQueries(searchQueries);
@@ -792,21 +809,31 @@ async function downloadBestSubtitleFromSubtitleCat(params: {
     return null;
   }
 
-  const targetSubtitlePath = await ensureUniquePath(
-    buildTargetSubtitlePath({
-      directory: params.directory,
-      title: params.title,
-      year: params.year,
-      videoId: params.videoId,
-      actresses: params.actresses,
-      modelName: params.modelName,
-      language: preferred.languageCode || "und",
-      extension: ".srt",
-      subtitleCount: 1,
-      resolveLongPath: params.resolveLongPath,
-      organizationSettings: params.organizationSettings
-    })
-  );
+  const targetSubtitlePath = params.inPlaceVideoPath
+    ? await ensureUniquePath(
+        path.join(
+          path.dirname(params.inPlaceVideoPath),
+          `${path.basename(
+            params.inPlaceVideoPath,
+            path.extname(params.inPlaceVideoPath)
+          )}.srt`
+        )
+      )
+    : await ensureUniquePath(
+        buildTargetSubtitlePath({
+          directory: params.directory,
+          title: params.title,
+          year: params.year,
+          videoId: params.videoId,
+          actresses: params.actresses,
+          modelName: params.modelName,
+          language: preferred.languageCode || "und",
+          extension: ".srt",
+          subtitleCount: 1,
+          resolveLongPath: params.resolveLongPath,
+          organizationSettings: params.organizationSettings
+        })
+      );
 
   await fs.writeFile(targetSubtitlePath, content, "utf8");
 
@@ -821,7 +848,7 @@ async function downloadBestSubtitleFromSubtitleCat(params: {
 
 async function fetchSubtitleCatResultsForQueries(
   queries: string[]
-): Promise<{ query: string | null; results: SubtitleCatResult[] }> {
+): Promise<{ query: string | null; results: OnlineSubtitleResult[] }> {
   for (const query of queries) {
     const results = await fetchSubtitleCatResults(query);
     if (results.length > 0) {
@@ -849,75 +876,11 @@ function buildSubtitleSearchQueries(videoId: string, title: string): string[] {
   );
 }
 
-interface SubtitleCatResult {
-  id: string;
-  title: string;
-  language: string;
-  languageCode: string;
-  downloadUrl: string;
-  downloads: number;
-}
-
-async function fetchSubtitleCatResults(query: string): Promise<SubtitleCatResult[]> {
-  async function searchOnce(q: string): Promise<SubtitleCatResult[]> {
-    const url = `https://www.subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5"
-      }
-    });
-    if (!response.ok) return [];
-    const html = await response.text();
-    const results: SubtitleCatResult[] = [];
-    const lines = html.split(/\r?\n/);
-
-    for (const line of lines) {
-      const linkMatch = line.match(/href=\"(\/sub\/[^\"]+\.srt)\"/i);
-      if (!linkMatch) continue;
-
-      const rawUrl = linkMatch[1];
-      const downloadUrl = `https://www.subtitlecat.com${rawUrl}`;
-      const titleMatch = line.match(/>([^<]{3,})<\/a>/i);
-      const title = titleMatch?.[1]?.trim() ?? q;
-      const langMatch =
-        line.match(/translated from ([A-Za-z]+)/i) ??
-        line.match(/alt=\"([A-Za-z ]{2,30})\"/i);
-      const language = langMatch?.[1]?.trim() ?? "Unknown";
-      const languageCode = language.toLowerCase().slice(0, 2) || "und";
-      const downloadsMatch =
-        line.match(/(\d[\d,]*)\s*(?:downloads?|dl)\b/i) ??
-        line.match(/⬇\s*(\d[\d,]*)/i);
-      const downloads = downloadsMatch ? Number(downloadsMatch[1].replace(/,/g, "")) : 0;
-      const id = `${languageCode}-${results.length}`;
-
-      if (!results.some((result) => result.downloadUrl === downloadUrl)) {
-        results.push({ id, title, language, languageCode, downloadUrl, downloads });
-      }
-    }
-
-    const normalizedQuery = q.toUpperCase();
-    return results
-      .filter(
-        (result) =>
-          result.title.toUpperCase().includes(normalizedQuery) ||
-          normalizedQuery.includes(result.title.toUpperCase())
-      )
-      .sort((left, right) => right.downloads - left.downloads || left.title.localeCompare(right.title))
-      .slice(0, 30);
-  }
-
-  try {
-    let results = await searchOnce(query);
-    if (results.length === 0 && query !== query.toUpperCase()) {
-      results = await searchOnce(query.toUpperCase());
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
+// SubtitleCat scraping lives in ./subtitleCat (shared with main.ts's manual
+// player search). The scanner previously kept its own copy of the old
+// `/sub/*.srt` direct-link parser here, which found nothing after SubtitleCat
+// moved to per-subtitle detail pages — errors were swallowed, so the
+// auto-download just silently did nothing.
 
 async function downloadSubtitleContent(url: string): Promise<string | null> {
   try {
@@ -936,7 +899,7 @@ async function downloadSubtitleContent(url: string): Promise<string | null> {
 }
 
 function matchesPreferredSubtitleLanguage(
-  result: SubtitleCatResult,
+  result: OnlineSubtitleResult,
   preferredLanguage: SubtitleLanguagePreference
 ): boolean {
   const language = result.language.toLowerCase();

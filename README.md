@@ -105,9 +105,12 @@ Typical behavior:
 - Write library metadata files where configured
 - Clean up empty folders after moves
 
+Every move/rename step above is gated by the **Move and rename files into library folders** scan option. Turn it off to import in place: videos and subtitles stay exactly where they are, downloaded subtitles land next to their video, and no `.nfo` files, conversions, or folder cleanup touch the source.
+
 ## Subtitle support
 
 - Auto-match local subtitle files during import
+- Auto-download from SubtitleCat during scans when no local subtitle matches (pick the preferred language)
 - Import subtitle files from configured subtitle directories
 - Search online subtitles from SubtitleCat
 - Download subtitles in the selected language

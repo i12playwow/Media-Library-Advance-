@@ -125,7 +125,7 @@ export function App() {
 
   const {
     movies, setMovies,
-    movieTotalCount, setMovieTotalCount, movieLoadOffset, setMovieLoadOffset,
+    movieTotalCount, setMovieTotalCount, movieModeCounts, movieLoadOffset, setMovieLoadOffset,
     sortMode, setSortMode,
     selectedMovieId, setSelectedMovieId,
     searchInput, setSearchInput,
@@ -442,6 +442,18 @@ export function App() {
     setPlayerPopupOpen(false);
   }
 
+  // ±10s seek from the popup's header buttons — the same step the control
+  // bar's ⏪/⏩ use, clamped to the media length once metadata is known.
+  function handlePopupSeek(deltaSeconds: number): void {
+    const video = videoRef.current;
+    if (!video) return;
+    const duration = video.duration;
+    const upper = Number.isFinite(duration) && duration > 0 ? duration : Number.MAX_SAFE_INTEGER;
+    video.currentTime = Math.max(0, Math.min(upper, video.currentTime + deltaSeconds));
+    setPlayerCurrentTime(video.currentTime);
+    void handlePlaybackTimeUpdate(video.currentTime);
+  }
+
   // Quick-play from a library tile: same flow as the context menu's
   // "Open in built-in player" — load the movie and pop the player up.
   function handlePlayMovieFromLibrary(movie: MovieRecord): void {
@@ -527,6 +539,9 @@ export function App() {
           if (page !== "actresses") setSelectedActress(null);
         }}
         movies={movies}
+        totalMovies={movieTotalCount}
+        normalCount={movieModeCounts.normal}
+        gentleCount={movieModeCounts.gentle}
         statusMessage={statusMessage}
       />
 
@@ -690,6 +705,7 @@ export function App() {
         <PlayerPopup
           title={playerPopupMovie?.title ?? ""}
           onClose={handleClosePlayerPopup}
+          onSeek={handlePopupSeek}
         >
           {playerPageElement}
         </PlayerPopup>

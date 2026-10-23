@@ -8,6 +8,7 @@ import type {
   LibraryMode,
   LibraryRoots,
   MovieRecord,
+  MovieModeCounts,
   OrganizationSettings,
   PlaybackCheckpoint,
   PlayerSettings,
@@ -288,6 +289,50 @@ export class DatabaseClient {
 
     const rows = this.db.prepare(sql).all(...params) as MovieRow[];
     return rows.filter((row) => existsSync(row.source_path)).length;
+  }
+
+  // Same filter family as countMovies, but one scan reports the whole
+  // total/normal/gentle split — the sidebar snapshot's full-library numbers.
+  countMoviesByMode(options?: { includeGentle?: boolean; query?: string }): MovieModeCounts {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    const includeGentle = options?.includeGentle ?? false;
+    const query = options?.query?.trim() ?? "";
+
+    if (!includeGentle) {
+      clauses.push("library_mode = 'normal'");
+    }
+    if (query) {
+      clauses.push(
+        "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
+      );
+      const like = `%${query}%`;
+      params.push(like, like, like, like, like);
+    }
+
+    const sql = [
+      "SELECT * FROM movies",
+      clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const rows = this.db.prepare(sql).all(...params) as MovieRow[];
+    let total = 0;
+    let normal = 0;
+    let gentle = 0;
+    for (const row of rows) {
+      if (!existsSync(row.source_path)) {
+        continue;
+      }
+      total += 1;
+      if (row.library_mode === "gentle") {
+        gentle += 1;
+      } else {
+        normal += 1;
+      }
+    }
+    return { total, normal, gentle };
   }
 
   getMovie(id: string): MovieRecord | null {

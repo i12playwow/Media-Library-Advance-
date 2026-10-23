@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -116,6 +117,7 @@ class DownloadReporter:
         self.total_bytes = total_bytes if total_bytes and total_bytes > 0 else None
         self.completed_files = 0
         self.completed_bytes = 0
+        self.active_file: str | None = None
         self._last_emit = 0.0
 
     def emit(
@@ -170,6 +172,96 @@ class DownloadReporter:
             0,
             min(100, round(((self.completed_files + current_fraction) / self.total_files) * 100)),
         )
+
+
+def install_byte_progress_hook(reporter: DownloadReporter) -> bool:
+    """Stream per-byte progress on huggingface_hub releases that dropped the
+    `tqdm_class` escape hatch.
+
+    Those releases render progress through their own internal bar factory
+    (`file_download._get_progress_bar_context`), so we swap it for a bar that
+    reports straight back to the DownloadReporter. Without this the UI sees a
+    single "starting" event and then nothing until the first file finishes,
+    which makes a multi-hundred-megabyte download look frozen.
+    """
+    try:
+        from contextlib import nullcontext
+
+        from huggingface_hub import file_download
+    except Exception:
+        return False
+
+    original = getattr(file_download, "_get_progress_bar_context", None)
+    if original is None:
+        return False
+
+    try:
+        positional_names = [
+            name
+            for name, parameter in inspect.signature(original).parameters.items()
+            if parameter.kind
+            in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+    except (TypeError, ValueError):
+        positional_names = []
+
+    class ReporterProgressBar:
+        def __init__(self, total: int | None, initial: int) -> None:
+            self.total = total
+            self.n = initial
+
+        def update(self, n: int = 1) -> None:
+            self.n += n
+            file_name = reporter.active_file
+            reporter.emit(
+                stage="downloading",
+                message=f"Downloading {file_name}" if file_name else "Downloading model file...",
+                file_name=file_name,
+                current_bytes=int(self.n),
+                current_total=self.total,
+            )
+
+        def close(self) -> None:
+            pass
+
+        def __enter__(self) -> "ReporterProgressBar":
+            return self
+
+        def __exit__(self, *_exc: Any) -> bool:
+            return False
+
+    def patched(*args: Any, **kwargs: Any) -> Any:
+        if args and positional_names:
+            merged: dict[str, Any] = dict(zip(positional_names, args))
+            merged.update(kwargs)
+            kwargs = merged
+
+        provided_bar = kwargs.get("_tqdm_bar")
+        if provided_bar is not None:
+            return nullcontext(provided_bar)
+
+        total_value = kwargs.get("total")
+        total = int(total_value) if isinstance(total_value, (int, float)) else None
+        try:
+            initial = max(0, int(kwargs.get("initial") or 0))
+        except (TypeError, ValueError):
+            initial = 0
+        return ReporterProgressBar(total, initial)
+
+    file_download._get_progress_bar_context = patched
+
+    # huggingface_hub streams in fixed 10 MiB chunks, so even with a reporting
+    # bar the UI would only tick once every 10 MiB (tens of seconds on a slow
+    # link). Shrink the read chunk so progress moves smoothly.
+    try:
+        constants = getattr(file_download, "constants", None)
+        current_chunk = getattr(constants, "DOWNLOAD_CHUNK_SIZE", None)
+        if isinstance(current_chunk, int) and current_chunk > 1024 * 1024:
+            constants.DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+    except Exception:
+        pass
+
+    return True
 
 
 def handle_check_model(args: argparse.Namespace) -> int:
@@ -282,18 +374,32 @@ def handle_download_model(args: argparse.Namespace) -> int:
                     )
                 return result
 
+        # Newer huggingface_hub releases removed the tqdm_class escape hatch;
+        # only pass it where the installed version accepts it, so per-byte
+        # progress streams when possible and downloads still work when not.
+        supports_tqdm_class = "tqdm_class" in inspect.signature(hf_hub_download).parameters
+        if not supports_tqdm_class:
+            install_byte_progress_hook(reporter)
+
         for file_entry in repo_files:
             progress_tqdm = type("ProgressTqdm", (DownloadProgressBar,), {})
             progress_tqdm.reporter = reporter
             progress_tqdm.file_name = file_entry["name"]
 
-            local_file = hf_hub_download(
-                repo_id=repo_id,
-                filename=file_entry["name"],
-                local_dir=model_dir,
-                force_download=False,
-                tqdm_class=progress_tqdm,
-            )
+            download_kwargs: dict[str, Any] = {
+                "repo_id": repo_id,
+                "filename": file_entry["name"],
+                "local_dir": model_dir,
+                "force_download": False,
+            }
+            if supports_tqdm_class:
+                download_kwargs["tqdm_class"] = progress_tqdm
+
+            reporter.active_file = file_entry["name"]
+            try:
+                local_file = hf_hub_download(**download_kwargs)
+            finally:
+                reporter.active_file = None
 
             final_file_size = file_entry["size"]
             if final_file_size is None and os.path.isfile(local_file):

@@ -8,7 +8,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import type { AppPage, LibraryMode, MovieRecord } from "../../../shared/contracts";
+import type { AppPage, LibraryMode, MovieModeCounts, MovieRecord } from "../../../shared/contracts";
 import { deriveRegionLabel, deriveStudioName, deriveTagLabel, inferActressFromPath } from "../utils";
 
 const PAGE_SIZE = 200;
@@ -32,6 +32,7 @@ export function useLibrary({
 }: UseLibraryOptions) {
   const [movies, setMovies] = useState<MovieRecord[]>([]);
   const [movieTotalCount, setMovieTotalCount] = useState(0);
+  const [movieModeCounts, setMovieModeCounts] = useState<MovieModeCounts>({ total: 0, normal: 0, gentle: 0 });
   const [movieLoadOffset, setMovieLoadOffset] = useState(0);
   const [sortMode, setSortMode] = useState<
     "actress" | "import-date" | "dvd-id" | "studio" | "tag" | "actress-age" | "recent-add" | "oldest" | "newest"
@@ -227,15 +228,18 @@ export function useLibrary({
     if (!desktopApi) return;
 
     const offset = append ? movieLoadOffset : 0;
-    const [nextMovies, total] = await Promise.all([
+    const [nextMovies, modeCounts] = await Promise.all([
       desktopApi.listMovies(query, PAGE_SIZE, offset),
-      append ? Promise.resolve(movieTotalCount) : desktopApi.countMovies(query),
+      append ? Promise.resolve(null) : desktopApi.countMoviesByMode(query),
     ]);
 
     startTransition(() => {
       setMovies((prev) => (append ? [...prev, ...nextMovies] : nextMovies));
       if (!append) {
-        setMovieTotalCount(total);
+        if (modeCounts) {
+          setMovieTotalCount(modeCounts.total);
+          setMovieModeCounts(modeCounts);
+        }
         setMovieLoadOffset(nextMovies.length);
       } else {
         setMovieLoadOffset((prev) => prev + nextMovies.length);
@@ -295,6 +299,7 @@ export function useLibrary({
     setMovies,
     movieTotalCount,
     setMovieTotalCount,
+    movieModeCounts,
     movieLoadOffset,
     setMovieLoadOffset,
     sortMode,

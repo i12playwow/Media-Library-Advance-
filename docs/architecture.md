@@ -34,7 +34,7 @@ this table):
 | `gentle:*` | gentle mode state changes | `gentle:toggle` (invoke), `gentle:unlockResult` (push) |
 | `auth:*` | the same gentle gate, named for who may call it | `auth:unlockGentle` (PIN), `auth:toggleGentle` (shortcut) |
 | `app:*` | whole-shell snapshot | `app:getState` |
-| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:count`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode` |
+| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:count`, `movies:modeCounts`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode` |
 | `scan:*` | scan lifecycle | `scan:cancel` (invoke), `scan:progress` (push) |
 | `library:*` | library roots | `library:addRoot` |
 | `shell:*` | OS integration | `shell:openFile`, `shell:showInFolder` |
@@ -44,14 +44,14 @@ this table):
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
 | `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-13 prefixes, 56 invoke channels (one `ipcMain.handle` each, all in main.ts),
+13 prefixes, 57 invoke channels (one `ipcMain.handle` each, all in main.ts),
 3 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
 `onSubtitleModelDownloadProgress`).
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 56 invoke channels has a
+- **Every named channel is real.** Each of the 57 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`
@@ -77,5 +77,5 @@ Two invariants worth knowing beyond the table:
   `MovieRecord`, `PlayerSettings`, the subtitle generation contract).
 - `app/renderer/src/hooks/*` — the renderer's IPC clients:
   `useBootstrap` (initial `app:getState`), `useLibrary` (`movies:list` /
-  `movies:count` and the gentle refilter), `useKeyboardShortcuts`
+  `movies:modeCounts` and the gentle refilter), `useKeyboardShortcuts`
   (`auth:toggleGentle` on Ctrl+Alt+D), `useSettings`.

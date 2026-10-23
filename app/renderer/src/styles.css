@@ -305,7 +305,9 @@ code {
 .content {
   flex: 1;
   min-width: 0;
-  padding: 1.75rem;
+  /* Top inset clears the frameless window's caption-button overlay
+     (titleBarOverlay, 40px tall at the top-right corner). */
+  padding: 2.75rem 1.75rem 1.75rem;
   display: grid;
   gap: 1.5rem;
   overflow-y: auto;
@@ -326,6 +328,14 @@ code {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+  /* Frameless window: the top bar is the drag handle for the whole window. */
+  -webkit-app-region: drag;
+}
+
+.topbar input,
+.topbar button,
+.topbar a {
+  -webkit-app-region: no-drag;
 }
 
 .topbar-actions,
@@ -1933,6 +1943,21 @@ code {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.player-popup-seek {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.3rem 0.45rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.player-popup-seek:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .player-popup-body {
   flex: 1;
   min-height: 0;
@@ -1942,6 +1967,90 @@ code {
 .player-popup-body .player-page {
   flex: 1;
   min-width: 0;
+}
+
+/* Drag-to-resize zones: thin strips on every edge, larger targets at the
+   corners, and a visible grip on the bottom-right corner. */
+.player-popup-resize {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+
+.player-popup-resize-n {
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.player-popup-resize-s {
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.player-popup-resize-e {
+  top: 16px;
+  bottom: 16px;
+  right: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+
+.player-popup-resize-w {
+  top: 16px;
+  bottom: 16px;
+  left: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+
+.player-popup-resize-ne {
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+}
+
+.player-popup-resize-nw {
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}
+
+.player-popup-resize-se {
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+}
+
+.player-popup-resize-se::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid rgba(255, 255, 255, 0.55);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.55);
+  border-radius: 1px;
+}
+
+.player-popup-resize-sw {
+  bottom: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
 }
 
 .player-topbar {

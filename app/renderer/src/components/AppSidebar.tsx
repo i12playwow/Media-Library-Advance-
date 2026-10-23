@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from "react";
+import React, { memo } from "react";
 import styles from './AppSidebar.module.css';
 import type { AppPage, MovieRecord } from "../../../shared/contracts";
 
@@ -16,6 +16,10 @@ interface AppSidebarProps {
   activePage: AppPage;
   onNavigate: (page: AppPage) => void;
   movies: MovieRecord[];
+  /** Full library total for the current filter — computed over the whole DB, not the loaded page. */
+  totalMovies: number;
+  normalCount: number;
+  gentleCount: number;
   statusMessage: string;
 }
 
@@ -28,17 +32,11 @@ export const AppSidebar = memo(function AppSidebar({
   activePage,
   onNavigate,
   movies,
+  totalMovies,
+  normalCount,
+  gentleCount,
   statusMessage,
 }: AppSidebarProps) {
-  const { normalCount, gentleCount } = useMemo(() => {
-    let normal = 0;
-    let gentle = 0;
-    for (const movie of movies) {
-      if (movie.libraryMode === "normal") normal += 1;
-      else if (movie.libraryMode === "gentle") gentle += 1;
-    }
-    return { normalCount: normal, gentleCount: gentle };
-  }, [movies]);
   return (
     <>
       <aside
@@ -88,11 +86,11 @@ export const AppSidebar = memo(function AppSidebar({
             <div className="sidebar-showcase">
               <div className="sidebar-showcase-header">
                 <span>Library snapshot</span>
-                <span>{movies.length} titles</span>
+                <span>{totalMovies} titles</span>
               </div>
               <div className="sidebar-summary-grid">
                 <div className="sidebar-summary-card">
-                  <strong>{movies.length}</strong>
+                  <strong>{totalMovies}</strong>
                   <span>Visible titles</span>
                 </div>
                 <div className="sidebar-summary-card">
