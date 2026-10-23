@@ -242,13 +242,38 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
   }, [desktopApi, selectedMovie, language, model, outputMode, outputDirectory, outputFileName]);
 
   async function handleDownloadModel(): Promise<void> {
-    if (!desktopApi || isDownloadingModel) {
+    if (!desktopApi || isDownloadingModel || isCheckingModel) {
+      return;
+    }
+
+    setShowDownloadPrompt(true);
+    setDismissedDownloadPromptFor(null);
+    setModelDownloadResult(null);
+
+    // Re-check first: the model may already be on disk (downloaded earlier,
+    // or the availability snapshot went stale). If it is, skip the download
+    // entirely and generate straight away.
+    let availability: SubtitleModelAvailability | null = null;
+    setIsCheckingModel(true);
+    try {
+      availability = await desktopApi.getSubtitleModelAvailability(model);
+      setModelAvailability(availability);
+    } catch {
+      availability = null;
+    } finally {
+      setIsCheckingModel(false);
+    }
+
+    if (availability?.available) {
+      setShowDownloadPrompt(false);
+      setModelDownloadProgress(null);
+      if (selectedMovie) {
+        await handleGenerate({ skipAvailabilityCheck: true });
+      }
       return;
     }
 
     setIsDownloadingModel(true);
-    setShowDownloadPrompt(true);
-    setDismissedDownloadPromptFor(null);
     setModelDownloadProgress({
       model,
       stage: "starting",
@@ -260,7 +285,6 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
       percent: 0,
       message: `Preparing to download ${model}.`
     });
-    setModelDownloadResult(null);
 
     try {
       const result = await desktopApi.downloadSubtitleModel(model);
@@ -287,12 +311,12 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
     }
   }
 
-  async function handleGenerate(): Promise<void> {
+  async function handleGenerate(options: { skipAvailabilityCheck?: boolean } = {}): Promise<void> {
     if (!desktopApi || !selectedMovie) {
       return;
     }
 
-    if (!modelAvailability?.available) {
+    if (!options.skipAvailabilityCheck && !modelAvailability?.available) {
       setDismissedDownloadPromptFor(null);
       setShowDownloadPrompt(true);
       return;
@@ -737,7 +761,7 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
               <p className="subtle">{modelDownloadResult.message}</p>
             )}
             <div className="inline-actions" style={{ justifyContent: "flex-end" }}>
-              <button className="primary-button" disabled={isDownloadingModel} onClick={() => void handleDownloadModel()} type="button">
+              <button className="primary-button" disabled={isDownloadingModel || isCheckingModel} onClick={() => void handleDownloadModel()} type="button">
                 {isDownloadingModel ? "Downloading..." : `Download ${model}`}
               </button>
               <button

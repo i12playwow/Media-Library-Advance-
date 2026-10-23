@@ -1,14 +1,19 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { PosterVisual } from "../components/PosterVisual";
 import { SamplePosterCard } from "../components/SamplePosterCard";
 import { ScanToast } from "../components/ScanToast";
 import { AppTopBar } from "../components/AppTopBar";
+import { AppSidebar } from "../components/AppSidebar";
+import { PlayerPopup } from "../components/PlayerPopup";
 import { PinPromptDialog } from "../components/PinPromptDialog";
 import { ContextMenu } from "../components/ContextMenu";
 import { DuplicateResolutionModal } from "../components/DuplicateResolutionModal";
 import { MovieTile } from "../components/MovieTile";
+import { ScanOptionsDialog } from "../components/ScanOptionsDialog";
+import { defaultScanOptions } from "../hooks/useSettings";
+import { DEFAULT_ORGANIZATION_SETTINGS } from "../../../shared/organizationTemplates";
 import type { DuplicateGroup, MovieRecord, ScanProgress } from "../../../shared/contracts";
 
 // ---------------------------------------------------------------------------
@@ -576,5 +581,132 @@ describe("MovieTile", () => {
       />
     );
     expect((container.firstChild as HTMLElement).className).toContain("active");
+  });
+})
+
+// ---------------------------------------------------------------------------
+// AppSidebar — library snapshot
+// ---------------------------------------------------------------------------
+describe("AppSidebar library snapshot", () => {
+  it("shows the full library totals, not the loaded page's length", () => {
+    render(
+      <AppSidebar
+        collapsed={false}
+        onToggleCollapse={() => {}}
+        width={260}
+        onResizeStart={() => {}}
+        pages={[{ id: "home", label: "Home" }]}
+        activePage="home"
+        onNavigate={() => {}}
+        movies={[makeMovie(), makeMovie({ id: "second-id" })]}
+        totalMovies={480}
+        normalCount={450}
+        gentleCount={30}
+        statusMessage="Ready"
+      />
+    );
+
+    // The snapshot reports DB totals even though only 2 movies are loaded.
+    expect(screen.getByText("480 titles")).toBeInTheDocument();
+    expect(screen.getByText("480")).toBeInTheDocument(); // Visible titles
+    expect(screen.getByText("450")).toBeInTheDocument(); // Normal mode
+    expect(screen.getByText("30")).toBeInTheDocument(); // Gentle mode
+    expect(screen.queryByText("2 titles")).toBeNull();
+  });
+})
+
+// ---------------------------------------------------------------------------
+// PlayerPopup — header seek buttons
+// ---------------------------------------------------------------------------
+describe("PlayerPopup header seek buttons", () => {
+  it("seeks ±10s from the title bar and leaves close untouched", () => {
+    const onSeek = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <PlayerPopup title="Test Movie" onClose={onClose} onSeek={onSeek}>
+        <div data-testid="player-child" />
+      </PlayerPopup>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Seek backward 10 seconds" }));
+    expect(onSeek).toHaveBeenLastCalledWith(-10);
+
+    fireEvent.click(screen.getByRole("button", { name: "Seek forward 10 seconds" }));
+    expect(onSeek).toHaveBeenLastCalledWith(10);
+    expect(onSeek).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+})
+
+// ---------------------------------------------------------------------------
+// PlayerPopup — drag to resize
+// ---------------------------------------------------------------------------
+describe("PlayerPopup resize handles", () => {
+  it("drags bigger and smaller from the corner, clamped to a minimum", () => {
+    const { container } = render(
+      <PlayerPopup title="Resize me" onClose={() => {}} onSeek={() => {}}>
+        <div />
+      </PlayerPopup>
+    );
+    const frame = container.querySelector(".player-popup") as HTMLElement;
+    const handle = container.querySelector(".player-popup-resize-se") as HTMLElement;
+    expect(frame).not.toBeNull();
+    expect(handle).not.toBeNull();
+
+    const rectSpy = vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({
+      left: 50,
+      top: 40,
+      width: 760,
+      height: 500,
+      right: 810,
+      bottom: 540,
+      x: 50,
+      y: 40,
+      toJSON: () => ({})
+    } as DOMRect);
+
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 300, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 600, clientY: 350, pointerId: 1 });
+    expect(frame.style.width).toBe("860px");
+    expect(frame.style.height).toBe("550px");
+    expect(frame.style.left).toBe("50px");
+    expect(frame.style.top).toBe("40px");
+
+    // Dragging past the floor stops at the popup's minimum size.
+    fireEvent.pointerMove(handle, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(frame.style.width).toBe("720px");
+    expect(frame.style.height).toBe("460px");
+
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    rectSpy.mockRestore();
+  });
+})
+
+// ---------------------------------------------------------------------------
+// ScanOptionsDialog — in-place (no-move) scan option
+// ---------------------------------------------------------------------------
+describe("ScanOptionsDialog move/rename toggle", () => {
+  it("defaults to on and switches the scan to import-in-place when unchecked", () => {
+    const onChangeScanOption = vi.fn();
+    render(
+      <ScanOptionsDialog
+        pendingScanMode="normal"
+        organizationDraft={{ ...DEFAULT_ORGANIZATION_SETTINGS }}
+        scanOptionsDraft={defaultScanOptions}
+        scanSourceMode="folder"
+        onChangeScanOption={onChangeScanOption}
+        onChangeScanSource={vi.fn()}
+        onConfirm={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: /move and rename files into library folders/i
+    }) as HTMLInputElement;
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(checkbox);
+    expect(onChangeScanOption).toHaveBeenCalledWith("moveRename", false);
   });
 })

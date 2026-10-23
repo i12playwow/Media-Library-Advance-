@@ -105,11 +105,13 @@ There is no test suite — type-checking is the primary correctness tool.
 - `ffmpegService.ts` — video probing (ffprobe) and conversion (ffmpeg)
 - `fileService.ts` — file system utilities (move, copy, long-path handling)
 - `libraryLayout.ts` — builds target paths from templates, writes `.nfo` files
+- `subtitleCat.ts` — shared SubtitleCat scraping (search rows → detail pages → per-language `.srt` links), used by both `player:fetchSubtitles` and the scanner's auto-download
 
 ## Key Implementation Details
 
 ### `app/services/libraryScanner.ts` + `app/main/main.ts`
 - **`registerLocalFiles()`** — imports existing video files into the library *in-place* (no move/copy), registered via `movies:addFiles` IPC handler
+- **`moveRename: false`** — `applyProcessingOptions()` skips organized placement entirely: videos and matched subtitles stay in place, SubtitleCat downloads are written next to the video named after it, and no `.nfo` sidecars, MP4 conversions, or empty-folder cleanup run
 - `DEFAULT_SCAN_OPTIONS` exported from scanner and used as the default in `movies:scan`
 - `extractVideoIdCandidates` used for multi-candidate video ID extraction
 
@@ -126,7 +128,7 @@ There is no test suite — type-checking is the primary correctness tool.
 ### `app/renderer/src/App.tsx`
 - **Player improvements**: fullscreen toggle, config panel (click-outside-to-close), volume/mute/rate synced imperatively to `<video>`, playback position memory (`rememberPosition`)
 - **Auto-resolve duplicates**: `autoResolveDuplicateGroups(groups, gentleUnlocked)` helper called by both `handleScanSaved` and `handleConfirmScanOptions`; reports `blocked` count for gentle-library files that need unlock
-- Subtitle scraping from **subtitlecat.com** — HTML-parsed rows with regex for download URLs, language, title
+- Subtitle scraping from **subtitlecat.com** lives in `app/services/subtitleCat.ts` — the search page links to per-subtitle detail pages (`subs/<id>/<title>.html`), which carry the per-language `/subs/.../*.srt` download links; the old direct-link rows (`/sub/*.srt`) are still parsed as a fallback
 
 ## UI Patterns
 - **Single-file renderer** — all pages and components live in `App.tsx` (large file, ~3000+ lines); no component subdirectory yet

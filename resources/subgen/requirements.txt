@@ -1,2 +1,6 @@
 faster-whisper>=1.1.0,<2
 huggingface_hub>=0.30.0,<1
+# faster-whisper 1.2.x passes metadata_errors to av.open(); PyAV 15+ removed
+# that parameter, and av<14.1 ships no Python 3.13 wheels — so 14.1.x is the
+# only compatible line on current Pythons.
+av>=14.1,<15

@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { DatabaseClient } from "../database/database";
 import { moveMovieToMode } from "../services/fileService";
@@ -12,6 +12,7 @@ import { extractSubtitleLanguage } from "../services/libraryScanner";
 import { readGuardsChainState, readGuardsChainSegments } from "../services/guardsChain";
 import { SUBTITLE_EXTENSIONS } from "../shared/contracts";
 import { enrichMoviePoster } from "../services/metadataService";
+import { fetchSubtitleCatResults } from "../services/subtitleCat";
 import { runFfmpeg } from "../services/ffmpegService";
 import type {
   AppShellState,
@@ -31,6 +32,7 @@ import type {
   SubtitleModelAvailability,
   SubtitleModelDownloadProgress,
   SubtitleModelDownloadResult,
+  SubtitleGenerationModel,
   SubtitleGenerationOptions,
   SubtitleGenerationPreview,
   SubtitleGenerationResult
@@ -85,6 +87,18 @@ function createWindow(): void {
     title: "MLA+",
     icon: resolveAppIconPath(),
     backgroundColor: "#0f1217",
+    // Frameless look: the OS title bar is hidden, native minimize/maximize/
+    // close buttons overlay the top-right corner (incl. Win11 snap layouts),
+    // and the window keeps its resize borders — so the app can still be
+    // dragged bigger or smaller from any edge. The default menu auto-hides
+    // so no menu row peeks below the hidden title bar (Alt reveals it).
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#0f1217",
+      symbolColor: "#ffffff",
+      height: 40
+    },
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -211,6 +225,243 @@ function resolveSubGenModelsRoot(): string {
   return path.join(app.getPath("userData"), "subgen-models");
 }
 
+function resolveSubGenRequirementsPath(): string {
+  return path.join(app.getAppPath(), "resources", "subgen", "requirements.txt");
+}
+
+// ── Sub-Gen Python resolution and self-setup ───────────────────────────────
+// "python" is not a reliable command on Windows: the Microsoft Store alias
+// answers "Python was not found" instead of running, and many installs only
+// expose the py launcher. Probe the candidates once and cache the winner.
+let subGenPythonCommand: string[] | null = null;
+let subGenPythonProbe: Promise<string[] | null> | null = null;
+
+function probePythonCommand(command: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    try {
+      const child = spawn(command[0], [...command.slice(1), "--version"], { windowsHide: true });
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.on("error", () => settle(false));
+      child.on("close", (code) => {
+        const lowered = output.toLowerCase();
+        settle(code === 0 && !lowered.includes("python was not found"));
+      });
+    } catch {
+      settle(false);
+    }
+  });
+}
+
+function resolveSubGenPython(): Promise<string[] | null> {
+  if (subGenPythonCommand) {
+    return Promise.resolve(subGenPythonCommand);
+  }
+  if (!subGenPythonProbe) {
+    const candidates = [["python"], ["py", "-3"], ["python3"]];
+    subGenPythonProbe = (async () => {
+      for (const candidate of candidates) {
+        if (await probePythonCommand(candidate)) {
+          subGenPythonCommand = candidate;
+          return candidate;
+        }
+      }
+      return null;
+    })();
+  }
+  return subGenPythonProbe;
+}
+
+type SubGenSpawnResult = { child: ChildProcessWithoutNullStreams } | { error: string };
+
+async function spawnSubGenPython(scriptArgs: string[], pythonOverride?: string[]): Promise<SubGenSpawnResult> {
+  const python = pythonOverride ?? (await resolveSubGenPython());
+  if (!python) {
+    return { error: "No Python interpreter was found (tried: python, py -3, python3)." };
+  }
+  try {
+    const child = spawn(python[0], [...python.slice(1), ...scriptArgs], {
+      cwd: app.getAppPath(),
+      windowsHide: true
+    });
+    return { child };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+interface SubGenProcessResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function collectSubGenProcessResult(child: ChildProcessWithoutNullStreams): Promise<SubGenProcessResult> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({ code: null, stdout, stderr: `${stderr}\n${error.message}`.trim() });
+    });
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+function tailOf(text: string, maxLines = 12): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-maxLines).join(" ");
+}
+
+function emitSubGenSetupProgress(
+  model: SubtitleGenerationModel,
+  message: string,
+  stage: SubtitleModelDownloadProgress["stage"]
+): void {
+  emitSubtitleModelDownloadProgress({
+    model,
+    stage,
+    fileName: null,
+    filesCompleted: 0,
+    totalFiles: 0,
+    downloadedBytes: 0,
+    totalBytes: null,
+    percent: stage === "completed" ? 100 : 0,
+    message
+  });
+}
+
+// Ensures faster-whisper + huggingface_hub exist, installing
+// resources/subgen/requirements.txt on demand — users should not have to run
+// pip by hand. The default `python` is not always able to host them (newer
+// interpreters can lack wheels for ctranslate2, faster-whisper's engine), so
+// each candidate interpreter is probed: an environment that already imports
+// wins immediately, otherwise the first where the install succeeds does.
+// Single-flight (concurrent callers share one run); a failed run clears the
+// cache so the next attempt retries. On success the chosen interpreter is
+// reused for every later Sub-Gen spawn.
+interface SubGenSetupResult {
+  ok: boolean;
+  message: string;
+  python: string[] | null;
+}
+
+const SUB_GEN_PYTHON_CANDIDATES: string[][] = [
+  ["python"],
+  ["py", "-3"],
+  ["py", "-3.14"],
+  ["py", "-3.13"],
+  ["py", "-3.12"],
+  ["py", "-3.11"],
+  ["python3"],
+  ["python3.13"],
+  ["python3.12"]
+];
+
+let subGenInstallPromise: Promise<SubGenSetupResult> | null = null;
+
+function ensureSubGenPackages(model: SubtitleGenerationModel): Promise<SubGenSetupResult> {
+  if (subGenInstallPromise) {
+    return subGenInstallPromise;
+  }
+
+  const installPromise = (async (): Promise<SubGenSetupResult> => {
+    const runnable: string[][] = [];
+    for (const candidate of SUB_GEN_PYTHON_CANDIDATES) {
+      if (await probePythonCommand(candidate)) {
+        runnable.push(candidate);
+      }
+    }
+    if (runnable.length === 0) {
+      return {
+        ok: false,
+        message: buildSubGenSetupMessage("No Python interpreter was found (tried: python, py -3, python3)."),
+        python: null
+      };
+    }
+
+    const importsPackages = async (python: string[]): Promise<boolean> => {
+      const probe = await spawnSubGenPython(["-c", "import faster_whisper, huggingface_hub"], python);
+      if ("error" in probe) {
+        return false;
+      }
+      const result = await collectSubGenProcessResult(probe.child);
+      return result.code === 0;
+    };
+
+    // Fast path: an interpreter that already has the packages.
+    for (const candidate of runnable) {
+      if (await importsPackages(candidate)) {
+        subGenPythonCommand = candidate;
+        return { ok: true, message: "Sub-Gen packages are installed.", python: candidate };
+      }
+    }
+
+    // Install path: try each interpreter until the packages land somewhere
+    // usable (a newer Python may simply have no wheels for ctranslate2).
+    let lastFailure = "";
+    for (const candidate of runnable) {
+      emitSubGenSetupProgress(
+        model,
+        `Installing Sub-Gen packages (faster-whisper, huggingface_hub) with ${candidate.join(" ")}…`,
+        "starting"
+      );
+      const install = await spawnSubGenPython(
+        ["-m", "pip", "install", "--disable-pip-version-check", "-r", resolveSubGenRequirementsPath()],
+        candidate
+      );
+      if ("error" in install) {
+        lastFailure = install.error;
+        continue;
+      }
+      const installResult = await collectSubGenProcessResult(install.child);
+      if (installResult.code === 0 && (await importsPackages(candidate))) {
+        subGenPythonCommand = candidate;
+        emitSubGenSetupProgress(model, `Sub-Gen packages installed (${candidate.join(" ")}).`, "completed");
+        return { ok: true, message: "Sub-Gen packages installed.", python: candidate };
+      }
+      lastFailure = tailOf(`${installResult.stdout}\n${installResult.stderr}`) || `pip exited with code ${installResult.code}.`;
+    }
+
+    const message = buildSubGenSetupMessage(
+      `${lastFailure} Note: faster-whisper needs a Python version with ctranslate2 wheels (3.9–3.13).`
+    );
+    emitSubGenSetupProgress(model, message, "error");
+    return { ok: false, message, python: null };
+  })();
+
+  subGenInstallPromise = installPromise;
+  void installPromise.then((result) => {
+    if (!result.ok) {
+      subGenInstallPromise = null;
+    }
+  });
+
+  return installPromise;
+}
+
 function buildSubGenSetupMessage(detail?: string): string {
   const suffix = detail ? ` ${detail}` : "";
   return `Sub-Gen needs a working Python install plus faster-whisper and huggingface_hub. Install the packages from resources/subgen/requirements.txt, then try again.${suffix}`;
@@ -274,43 +525,28 @@ async function getSubtitleModelAvailability(model: SubtitleGenerationOptions["mo
     };
   }
 
-  return new Promise<SubtitleModelAvailability>((resolve) => {
-    const child = spawn("python", [scriptPath, "check-model", "--model", model, "--models-root", modelsRoot], {
-      cwd: app.getAppPath(),
-      windowsHide: true
-    });
-    let stdout = "";
-    let stderr = "";
+  const spawned = await spawnSubGenPython([scriptPath, "check-model", "--model", model, "--models-root", modelsRoot]);
+  if ("error" in spawned) {
+    return {
+      model,
+      available: false,
+      modelPath: null,
+      message: buildSubGenSetupMessage(spawned.error)
+    };
+  }
 
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      resolve({
-        model,
-        available: false,
-        modelPath: null,
-        message: buildSubGenSetupMessage(error.message)
-      });
-    });
-    child.on("close", () => {
-      const result = extractSubtitleScriptResult<SubtitleModelAvailability>(stdout);
-      if (result) {
-        resolve(result);
-        return;
-      }
+  const { stdout, stderr } = await collectSubGenProcessResult(spawned.child);
+  const result = extractSubtitleScriptResult<SubtitleModelAvailability>(stdout);
+  if (result) {
+    return result;
+  }
 
-      resolve({
-        model,
-        available: false,
-        modelPath: null,
-        message: stderr.trim() || "Unable to check the selected Whisper model."
-      });
-    });
-  });
+  return {
+    model,
+    available: false,
+    modelPath: null,
+    message: stderr.trim() || "Unable to check the selected Whisper model."
+  };
 }
 
 async function downloadSubtitleModel(model: SubtitleGenerationOptions["model"]): Promise<SubtitleModelDownloadResult> {
@@ -335,11 +571,46 @@ async function downloadSubtitleModel(model: SubtitleGenerationOptions["model"]):
       };
     }
 
-    return new Promise<SubtitleModelDownloadResult>((resolve) => {
-      const child = spawn("python", [scriptPath, "download-model", "--model", model, "--models-root", modelsRoot], {
-        cwd: app.getAppPath(),
-        windowsHide: true
+    // Self-setup: faster-whisper + huggingface_hub are required to download a
+    // model, so install them on demand before spawning the downloader.
+    const setup = await ensureSubGenPackages(model);
+    if (!setup.ok) {
+      return {
+        ok: false,
+        model,
+        available: false,
+        modelPath: null,
+        message: setup.message,
+        setupRequired: true
+      };
+    }
+
+    const spawned = await spawnSubGenPython([scriptPath, "download-model", "--model", model, "--models-root", modelsRoot], setup.python ?? undefined);
+    if ("error" in spawned) {
+      const message = buildSubGenSetupMessage(spawned.error);
+      emitSubtitleModelDownloadProgress({
+        model,
+        stage: "error",
+        fileName: null,
+        filesCompleted: 0,
+        totalFiles: 0,
+        downloadedBytes: 0,
+        totalBytes: null,
+        percent: 0,
+        message
       });
+      return {
+        ok: false,
+        model,
+        available: false,
+        modelPath: null,
+        message,
+        setupRequired: true
+      };
+    }
+
+    return new Promise<SubtitleModelDownloadResult>((resolve) => {
+      const child = spawned.child;
       let stdout = "";
       let stderr = "";
       let stdoutBuffer = "";
@@ -549,11 +820,31 @@ async function runSubtitleGeneration(movie: MovieRecord, options: SubtitleGenera
     args.push("--language", options.language);
   }
 
+  // Self-setup: transcription needs faster-whisper, so install on demand.
+  const setup = await ensureSubGenPackages(options.model);
+  if (!setup.ok) {
+    return {
+      ok: false,
+      message: setup.message,
+      subtitlePath: null,
+      detectedLanguage: null,
+      setupRequired: true
+    };
+  }
+
+  const spawned = await spawnSubGenPython(args, setup.python ?? undefined);
+  if ("error" in spawned) {
+    return {
+      ok: false,
+      message: buildSubGenSetupMessage(spawned.error),
+      subtitlePath: null,
+      detectedLanguage: null,
+      setupRequired: true
+    };
+  }
+
   return new Promise<SubtitleGenerationResult>((resolve) => {
-    const child = spawn("python", args, {
-      cwd: app.getAppPath(),
-      windowsHide: true
-    });
+    const child = spawned.child;
     let stdout = "";
     let stderr = "";
 
@@ -690,125 +981,9 @@ async function backfillMoviePosters(
   return summary;
 }
 
-async function fetchSubtitleCatResults(query: string): Promise<OnlineSubtitleResult[]> {
-  async function searchOnce(q: string): Promise<OnlineSubtitleResult[]> {
-    const url = `https://www.subtitlecat.com/index.php?search=${encodeURIComponent(q)}`;
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5"
-      }
-    });
-    if (!response.ok) return [];
-    const html = await response.text();
-    const results: OnlineSubtitleResult[] = [];
-
-    // Merge both subtitle row parsing strategies for robustness
-    // 1. Table row regex (original)
-    const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-    const rows = html.match(rowRegex) ?? [];
-    for (const row of rows) {
-      const pageLinkMatch = row.match(/href="(subs\/[^"]+\.html)"/i);
-      if (!pageLinkMatch) continue;
-      const detailUrl = `https://www.subtitlecat.com/${pageLinkMatch[1]}`;
-      const downloadsMatch = row.match(/(\d+)\s+downloads?/i);
-      const rowDownloads = downloadsMatch ? Number(downloadsMatch[1]) : 0;
-      const rowTitleMatch = row.match(/<a[^>]+href="subs\/[^"]+\.html"[^>]*>([^<]+)<\/a>/i);
-      const rowTitle = rowTitleMatch?.[1]?.trim() ?? q;
-      try {
-        const detailResponse = await fetch(detailUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5"
-          }
-        });
-        if (!detailResponse.ok) continue;
-        const detailHtml = await detailResponse.text();
-        const detailMatches = Array.from(
-          detailHtml.matchAll(
-            /<a[^>]+id="download_([a-z]{2}(?:-[A-Z]{2})?)"[^>]+href="([^"]+\.srt[^"]*)"[^>]*>(?:Download)?<\/a>/gi
-          )
-        );
-        for (const match of detailMatches) {
-          const langCode = match[1].toLowerCase();
-          const downloadUrl = match[2].startsWith("http")
-            ? match[2]
-            : `https://www.subtitlecat.com${match[2]}`;
-          const language = languageLabelFromCode(langCode);
-          const id = `${langCode}-${results.length}`;
-          if (!results.some((r) => r.downloadUrl === downloadUrl)) {
-            results.push({
-              id,
-              title: rowTitle,
-              language,
-              languageCode: langCode,
-              downloadUrl,
-              downloads: rowDownloads
-            });
-          }
-        }
-      } catch {
-        // ignore failed detail page fetches
-      }
-    }
-
-    // 2. Line-based parsing (new)
-    const lines = html.split(/\r?\n/);
-    for (const line of lines) {
-      const linkMatch = line.match(/href=\"(\/sub\/[^\"]+\.srt)\"/i);
-      if (!linkMatch) continue;
-      const rawUrl = linkMatch[1];
-      const downloadUrl = `https://www.subtitlecat.com${rawUrl}`;
-      const titleMatch = line.match(/>(SONE-[^<]+)</i) || line.match(/>([^<]{3,})<\/a>/i);
-      const title = titleMatch?.[1]?.trim() ?? q;
-      const langMatch = line.match(/translated from ([A-Za-z]+)/i) || line.match(/alt=\"([A-Za-z ]{2,30})\"/i);
-      const language = langMatch?.[1]?.trim() ?? "Unknown";
-      const langCode = language.toLowerCase().slice(0, 2);
-      const downloadsMatch =
-        line.match(/(\d[\d,]*)\s*(?:downloads?|dl)\b/i) ||
-        line.match(/\u2b07\s*(\d[\d,]*)/i);
-      const downloads = downloadsMatch ? Number(downloadsMatch[1].replace(/,/g, "")) : 0;
-      const id = `${langCode}-${results.length}`;
-      if (!results.some((r) => r.downloadUrl === downloadUrl)) {
-        results.push({ id, title, language, languageCode: langCode, downloadUrl, downloads });
-      }
-    }
-    const normalizedQuery = q.toUpperCase();
-    return results
-      .filter((result) => result.title.toUpperCase().includes(normalizedQuery) || normalizedQuery.includes(result.title.toUpperCase()))
-      .sort((left, right) => right.downloads - left.downloads || left.title.localeCompare(right.title))
-      .slice(0, 30);
-  }
-  try {
-    let results = await searchOnce(query);
-    if (results.length === 0 && query !== query.toUpperCase()) {
-      results = await searchOnce(query.toUpperCase());
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
-
-function languageLabelFromCode(code: string): string {
-  const normalized = code.toLowerCase();
-  if (normalized === "zh-hans") return "Chinese Simplified";
-  if (normalized === "zh-hant" || normalized === "zh-tw") return "Chinese Traditional";
-  if (normalized === "zh") return "Chinese";
-  if (normalized === "en") return "English";
-  if (normalized === "ja") return "Japanese";
-  if (normalized === "ko") return "Korean";
-  if (normalized === "es") return "Spanish";
-  if (normalized === "fr") return "French";
-  if (normalized === "de") return "German";
-  if (normalized === "pt") return "Portuguese";
-  if (normalized === "ar") return "Arabic";
-  if (normalized === "ru") return "Russian";
-  if (normalized === "it") return "Italian";
-  return code.length > 0 ? code.toUpperCase() : "Unknown";
-}
+// SubtitleCat search/parse lives in services/subtitleCat.ts — shared with the
+// scanner's auto-download so there is one parser to keep in sync with the
+// site's markup.
 
 function registerHandlers(): void {
     ipcMain.handle("settings:getGentleShortcut", async () => {
@@ -884,6 +1059,13 @@ function registerHandlers(): void {
 
   ipcMain.handle("movies:count", async (_event, args?: { query?: string }) => {
     return database.countMovies({
+      includeGentle: gentleUnlocked,
+      query: args?.query ?? ""
+    });
+  });
+
+  ipcMain.handle("movies:modeCounts", async (_event, args?: { query?: string }) => {
+    return database.countMoviesByMode({
       includeGentle: gentleUnlocked,
       query: args?.query ?? ""
     });
@@ -1373,6 +1555,23 @@ function registerHandlers(): void {
         detectedLanguage: null,
         setupRequired: false
       };
+    }
+
+    // Sub-Gen is self-configuring: when the selected model hasn't been
+    // downloaded yet, fetch it now (progress streams to the renderer over
+    // subtitle:modelDownloadProgress) and only then generate.
+    const availability = await getSubtitleModelAvailability(options.model);
+    if (!availability.available) {
+      const download = await downloadSubtitleModel(options.model);
+      if (!download.ok) {
+        return {
+          ok: false,
+          message: download.message,
+          subtitlePath: null,
+          detectedLanguage: null,
+          setupRequired: download.setupRequired
+        };
+      }
     }
 
     return runSubtitleGeneration(movie, options);

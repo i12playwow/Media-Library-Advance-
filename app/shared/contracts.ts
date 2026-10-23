@@ -68,6 +68,13 @@ export interface SubtitleModelDownloadResult {
   setupRequired: boolean;
 }
 
+export interface MovieModeCounts {
+  /** Total titles matching the current filter; vanished files excluded. */
+  total: number;
+  normal: number;
+  gentle: number;
+}
+
 export interface OnlineSubtitleResult {
   id: string;
   title: string;

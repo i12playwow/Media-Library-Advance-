@@ -210,17 +210,99 @@ const LEG_LABELS = [
 
 // Resolve playwright.config.ts with the given environment — proving what
 // the config *does*, not what it says. The file is ESM-flavored TypeScript
-// in a CommonJS package, so require() cannot load it directly: erase the
-// types, translate the one named import and one default export the file is
-// allowed to have, and evaluate the rest verbatim. Anything beyond that
-// shape fails loudly rather than silently asserting nothing.
+// in a CommonJS package, so require() cannot load it directly: translate the
+// one named import and one default export the file is allowed to have, and
+// evaluate the rest verbatim. Anything beyond that shape fails loudly rather
+// than silently asserting nothing.
 //
-// The erasure is TypeScript's own transpiler (module: ESNext, so the ESM
-// shape above survives for the rewrites). It is the compiler `tsc -b`
-// already runs, it reports syntax errors instead of evaluating half a file,
-// and — unlike node:module's stripTypeScriptTypes — it prints no
-// ExperimentalWarning into the suite log on every `npm test`.
-function resolvePlaywrightConfig(env: NodeJS.ProcessEnv) {
+// Type erasure is the LAST resort, not the first step. The config is plain
+// JavaScript today, and `new Function` refuses import/export and every
+// TS-only construct with a SyntaxError, so a successful parse is itself
+// proof that no compiler is needed. Loading TypeScript costs ~230 ms per
+// test process; the fast path skips that unless the file actually grows
+// types. When it does, the compiler is TypeScript's own transpiler — the one
+// `tsc -b` runs — which reports syntax errors instead of evaluating half a
+// file and, unlike node:module's stripTypeScriptTypes, prints no
+// ExperimentalWarning into the suite log.
+const CONFIG_PATH = path.join(repoRoot, "playwright.config.ts");
+
+const CONFIG_SHAPE_ERROR =
+  "playwright.config.ts outgrew the loader's known shape (one named import, one default export)";
+
+type ResolvedConfig = {
+  retries: number;
+  use: { video: string; trace?: string; screenshot?: string };
+};
+
+function rewriteConfigModule(source: string): string {
+  return source
+    .replace(/^\s*import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];?\s*$/m,
+      (_m: string, names: string, from: string) => `const {${names}} = require("${from}");`)
+    .replace(/^\s*export\s+default\s+/m, "module.exports.default = ");
+}
+
+// Compile-time parse only: `new Function` compiles the body, so a SyntaxError
+// here means the source is not yet a CommonJS module body (TS syntax, or an
+// import/export the rewrite does not translate). Runtime errors happen later,
+// inside the factory, and must never be mistaken for "needs erasing".
+function parseConfigModule(js: string): ((...args: unknown[]) => void) | null {
+  try {
+    return new Function("require", "module", "exports", js) as (...args: unknown[]) => void;
+  } catch (err) {
+    if (err instanceof SyntaxError) return null;
+    throw err;
+  }
+}
+
+// Erase the config's types with TypeScript's own transpiler. ESNext keeps the
+// import/export shape for the rewrites; verbatimModuleSyntax keeps imports
+// verbatim, because an elided unused import would hide itself from the shape
+// check below; reportDiagnostics turns an unparsable config into a named
+// failure instead of half an evaluation.
+function eraseConfigTypes(source: string): string {
+  const ts = require("typescript");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      verbatimModuleSyntax: true
+    },
+    reportDiagnostics: true,
+    fileName: "playwright.config.ts"
+  });
+  if ((transpiled.diagnostics ?? []).length > 0) {
+    throw new Error(
+      "playwright.config.ts no longer transpiles cleanly: " +
+        ts.flattenDiagnosticMessageText(transpiled.diagnostics[0].messageText, " ")
+    );
+  }
+  return transpiled.outputText;
+}
+
+// The resolver's whole contract over a source string, so the branch can be
+// probed without a file: plain JavaScript evaluates directly; anything else
+// goes through `erase` and is then held to the same shape rule.
+function resolveConfigSource(
+  source: string,
+  erase: (text: string) => string = eraseConfigTypes
+): ResolvedConfig {
+  const evaluate = (factory: (...args: unknown[]) => void): ResolvedConfig => {
+    const mod = { exports: {} as Record<string, unknown> };
+    factory(require, mod, mod.exports);
+    return mod.exports.default as ResolvedConfig;
+  };
+
+  const plain = parseConfigModule(rewriteConfigModule(source));
+  if (plain) return evaluate(plain);
+
+  // Not plain JavaScript: pay for the compiler, then hold its output to the
+  // same shape rule (a second import must fail, not be evaluated).
+  const js = rewriteConfigModule(erase(source));
+  if (/^\s*(import|export)\b/m.test(js)) throw new Error(CONFIG_SHAPE_ERROR);
+  return evaluate(new Function("require", "module", "exports", js) as (...args: unknown[]) => void);
+}
+
+function resolvePlaywrightConfig(env: NodeJS.ProcessEnv): ResolvedConfig {
   const savedEnv = process.env;
   // Each scenario starts from a CLEAN slate: the ambient environment must
   // not leak into the scenario being resolved, or on CI the CI=1 ambient
@@ -229,46 +311,7 @@ function resolvePlaywrightConfig(env: NodeJS.ProcessEnv) {
   // is the whole truth about the environment being simulated.
   process.env = { ...env };
   try {
-    const ts = require("typescript");
-    const transpiled = ts.transpileModule(
-      fs.readFileSync(path.join(repoRoot, "playwright.config.ts"), "utf8"),
-      {
-        compilerOptions: {
-          module: ts.ModuleKind.ESNext,
-          target: ts.ScriptTarget.ES2022,
-          // Erase types only — never elide imports. Unused value imports are
-          // dropped by default, which would hide a second import from the
-          // shape guard below; verbatimModuleSyntax keeps the import graph
-          // exactly as written, and requires type-only imports to say so.
-          verbatimModuleSyntax: true
-        },
-        reportDiagnostics: true,
-        fileName: "playwright.config.ts"
-      }
-    );
-    // A config that no longer parses fails here, by name, rather than half
-    // evaluating and asserting something weaker than the file intends.
-    if ((transpiled.diagnostics ?? []).length > 0) {
-      throw new Error(
-        "playwright.config.ts no longer transpiles cleanly: " +
-          ts.flattenDiagnosticMessageText(transpiled.diagnostics[0].messageText, " ")
-      );
-    }
-    const js = transpiled.outputText
-      .replace(/^\s*import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];?\s*$/m,
-        (_m: string, names: string, from: string) => `const {${names}} = require("${from}");`)
-      .replace(/^\s*export\s+default\s+/m, "module.exports.default = ");
-    if (/^\s*(import|export)\b/m.test(js)) {
-      throw new Error(
-        "playwright.config.ts outgrew the loader's known shape (one named import, one default export)"
-      );
-    }
-    const mod = { exports: {} as Record<string, unknown> };
-    new Function("require", "module", "exports", js)(require, mod, mod.exports);
-    return mod.exports.default as {
-      retries: number;
-      use: { video: string; trace?: string; screenshot?: string };
-    };
+    return resolveConfigSource(fs.readFileSync(CONFIG_PATH, "utf8"));
   } finally {
     process.env = savedEnv;
   }
@@ -854,6 +897,25 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
     ],
   },
   {
+    method: "countMoviesByMode",
+    fragments: [
+      "SELECT * FROM movies",
+      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
+    ],
+    exact: [
+      "",
+      "",
+      "library_mode = 'normal'",
+      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
+      "SELECT * FROM movies",
+      " AND ",
+      " ",
+      "%${query}%",
+      "WHERE ${clauses.join(\" AND \")}",
+      "gentle"
+    ],
+  },
+  {
     method: "getMovie",
     fragments: ["SELECT * FROM movies WHERE id = ?"],
     exact: ["SELECT * FROM movies WHERE id = ?"],
@@ -1204,6 +1266,70 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // Video is retained on failure in both environments (pre-existing).
     expect(inCi.use.video, "CI video").toBe("retain-on-failure");
     expect(locally.use.video, "local video").toBe("retain-on-failure");
+  });
+
+  it("the config loader parses plain JavaScript first and pays for the compiler only when it must", () => {
+    // The common path must never touch TypeScript. The real config is plain
+    // JavaScript today, so a successful fast parse is itself the proof that no
+    // erasure is needed; this spy fails the test if that stops being true.
+    const neverErase = () => {
+      throw new Error("the eraser must not run for a plain-JavaScript config");
+    };
+    expect(
+      resolveConfigSource("export default { retries: 7 };", neverErase),
+      "a plain-JavaScript config resolves without erasure"
+    ).toEqual({ retries: 7 });
+
+    // The shipped config takes the fast path today, proven on its real bytes.
+    // If it ever grows types this fails, so the change is deliberate — the
+    // eraser still handles it, at a ~230 ms cost.
+    expect(
+      parseConfigModule(rewriteConfigModule(fs.readFileSync(CONFIG_PATH, "utf8"))),
+      "the real config is plain JavaScript, so the suite takes the fast path"
+    ).not.toBeNull();
+
+    // The compiler branch: a type annotation makes the fast parse fail, and
+    // the injected eraser stands in for TypeScript so this probe stays cheap.
+    // The real eraser's call shape is pinned at the end of this test.
+    const erased: string[] = [];
+    const erase = (text: string) => {
+      erased.push(text);
+      return text.replace(": number", "");
+    };
+    expect(
+      resolveConfigSource("const retries: number = 3;\nexport default { retries };", erase),
+      "the erased output is what gets evaluated"
+    ).toEqual({ retries: 3 });
+    expect(erased, "the compiler branch ran, exactly once").toHaveLength(1);
+
+    // Whatever the eraser returns is still held to the shape rule: a second
+    // import left behind by a sloppy eraser fails instead of being evaluated.
+    expect(
+      () =>
+        resolveConfigSource(
+          'const retries: number = 3;\nimport extra from "node:path";\nexport default { retries };',
+          erase
+        ),
+      "the shape rule covers erased output too"
+    ).toThrow(/outgrew the loader's known shape/);
+
+    // The real eraser is TypeScript's transpiler with the options that keep
+    // the shape rule honest, and `require("typescript")` appears exactly once
+    // — inside it — so the fast path carries no hidden compiler load. Pins are
+    // composed from fragments so this file's own literals cannot satisfy them.
+    const pin = (a: string, b: string) => a + b;
+    const compilerPins: Array<[string, string]> = [
+      [pin("require(", '"typescript")'), "TypeScript is required exactly once, in the eraser"],
+      [pin("ts.transpile", "Module("), "the eraser is the TypeScript transpiler"],
+      [pin("module: ts.Module", "Kind.ESNext"), "ESM survives for the rewrites"],
+      [pin("target: ts.Script", "Target.ES2022"), "modern target, no downleveling"],
+      [pin("verbatimModule", "Syntax: true"), "imports are never elided"],
+      [pin("reportDiag", "nostics: true"), "unparsable configs fail by name"],
+      [pin("ts.flattenDiagnostic", "MessageText("), "the diagnostic message is surfaced"]
+    ];
+    for (const [needle, why] of compilerPins) {
+      expect(lintCode.split(needle).length - 1, why).toBe(1);
+    }
   });
 
   it("the e2e job runs nightly (plus manual dispatch), not on every push", () => {

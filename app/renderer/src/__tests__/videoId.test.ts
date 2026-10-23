@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Pure regex extraction over shared/videoId: no DOM, so no happy-dom needed.
 import { describe, expect, it } from "vitest";
 import { extractStrictJavVideoIdCandidates, extractVideoIdCandidates } from "../../../shared/videoId";
 

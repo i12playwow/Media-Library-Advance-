@@ -5,6 +5,7 @@ import type {
   GuardsChainState,
   MetadataSettings,
   LibraryMode,
+  MovieModeCounts,
   MovieRecord,
   OnlineSubtitleResult,
   OrganizationSettings,
@@ -43,6 +44,7 @@ declare global {
       pickScanFolder: (options: ScanAutomationOptions) => Promise<ScanSummary>;
       listMovies: (query?: string, limit?: number, offset?: number) => Promise<MovieRecord[]>;
       countMovies: (query?: string) => Promise<number>;
+      countMoviesByMode: (query?: string) => Promise<MovieModeCounts>;
       listAllMovies: () => Promise<MovieRecord[]>;
       ensureMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
       refreshMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;

@@ -6,6 +6,7 @@ import type {
   GuardsChainState,
   MetadataSettings,
   LibraryMode,
+  MovieModeCounts,
   MovieRecord,
   OnlineSubtitleResult,
   OrganizationSettings,
@@ -59,6 +60,8 @@ const api = {
     ipcRenderer.invoke("movies:list", { query, limit, offset }),
   countMovies: (query?: string): Promise<number> =>
     ipcRenderer.invoke("movies:count", { query }),
+  countMoviesByMode: (query?: string): Promise<MovieModeCounts> =>
+    ipcRenderer.invoke("movies:modeCounts", { query }),
   ensureMoviePosters: (movieIds: string[]): Promise<PosterBackfillSummary> =>
     ipcRenderer.invoke("movies:ensurePosters", movieIds),
   refreshMoviePosters: (movieIds: string[]): Promise<PosterBackfillSummary> =>

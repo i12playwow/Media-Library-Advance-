@@ -14,7 +14,8 @@ table **together**.
 
 ## The query side
 
-`listMovies` and `countMovies` build their filter from one clause:
+`listMovies`, `countMovies` and `countMoviesByMode` build their filter from
+one clause:
 
 ```
 (title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)
@@ -24,8 +25,8 @@ Five searchable columns: `title`, `video_id`, `source_path`,
 `actresses_json`, `keywords_json`. (SQLite's `LIKE` is case-insensitive for
 ASCII by default, which is the search "folding" the app offers.) The same
 options carry the gentle-mode filter (`includeGentle`, which gates on
-`library_mode`) and pagination (`limit`/`offset`). Both query methods share
-the clause; neither sorts by relevance — there is no relevance to sort by.
+`library_mode`) and pagination (`limit`/`offset`). All three query methods share
+the clause; none of them sorts by relevance — there is no relevance to sort by.
 
 ## The write-path table
 
@@ -60,11 +61,12 @@ and how it relates to search.
 |---|---|---|---|
 | `listMovies` | `SELECT * FROM movies` + the five-column `LIKE` clause + `ORDER BY updated_at DESC, title ASC` | all five | the library grid's entry point; filters on `library_mode` unless `includeGentle`, and pages in memory after hiding rows whose file vanished |
 | `countMovies` | `SELECT * FROM movies` + the same five-column `LIKE` clause | all five | the same filter family for counts; also hides vanished files before counting |
+| `countMoviesByMode` | `SELECT * FROM movies` + the same five-column `LIKE` clause | all five | one scan reports the whole `total`/`normal`/`gentle` split for the sidebar's library snapshot; applies the same vanished-file filter, so its `total` equals `countMovies` for the same options |
 | `getMovie` | `SELECT * FROM movies WHERE id = ?` | none by clause | single-row detail lookup |
 | `findMovieIdBySourcePath` | `SELECT id FROM movies WHERE source_path = ?` | `source_path`, exact match (no `LIKE`) | the dedupe/duplicate-check path |
 | `getMovieByVideoId` | `SELECT id, title FROM movies WHERE LOWER(video_id) = LOWER(?)` | `video_id`, case-folded exact match | metadata import's id lookup |
 
-That is the complete set: five readers — two clause-builders, two
+That is the complete set: six readers — three clause-builders, two
 single-purpose lookups, one id/title pair-fetch. `deleteMovie` also contains
 the string `FROM movies`, but as a `DELETE` — a write-path row, not a read.
 Any new `FROM movies` or `JOIN movies` statement in database.ts — class

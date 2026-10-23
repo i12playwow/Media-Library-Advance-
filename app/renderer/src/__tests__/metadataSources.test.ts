@@ -1,3 +1,6 @@
+// @vitest-environment node
+// The metadata service is HTTP + caching logic stubbed at globalThis.fetch;
+// no DOM is involved, so the happy-dom environment would be pure overhead.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetadataSettings } from "../../../shared/contracts";
 

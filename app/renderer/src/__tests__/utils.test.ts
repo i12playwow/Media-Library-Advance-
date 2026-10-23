@@ -1,3 +1,6 @@
+// @vitest-environment node
+// Pure string/formatting helpers: nothing here touches the DOM, and
+// happy-dom costs ~300 ms to stand up per test file. Node is enough.
 import { describe, expect, it } from "vitest";
 import type { PosterBackfillSummary, ScanProgress, ScanSummary } from "../../../shared/contracts";
 import {
