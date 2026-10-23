@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef } from "react";
 import type { LibraryMode, MovieRecord } from "../../../shared/contracts";
 import { MovieTile } from "./MovieTile";
 
@@ -35,6 +36,7 @@ interface LibraryPageProps {
   handleBatchMove: (mode: LibraryMode) => Promise<void>;
   loadMoreMovies: () => Promise<void>;
   PAGE_SIZE: number;
+  onPlayMovie: (movie: MovieRecord) => void;
 }
 
 export function LibraryPage({
@@ -59,7 +61,35 @@ export function LibraryPage({
   handleBatchMove,
   loadMoreMovies,
   PAGE_SIZE,
+  onPlayMovie,
 }: LibraryPageProps) {
+  const hasMoreMovies = movies.length < movieTotalCount;
+  const loadMoreRef = useRef(loadMoreMovies);
+  loadMoreRef.current = loadMoreMovies;
+  const loadingMoreRef = useRef(false);
+  const loadMoreBarRef = useRef<HTMLDivElement | null>(null);
+
+  // Infinite scroll: when the load-more bar approaches the viewport, fetch the
+  // next page automatically. The manual button stays as a fallback. The guard
+  // is required because loadMoreMovies has no reentrancy protection — two
+  // overlapping calls would append the same page twice.
+  useEffect(() => {
+    const bar = loadMoreBarRef.current;
+    if (!hasMoreMovies || !bar || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting) || loadingMoreRef.current) return;
+        loadingMoreRef.current = true;
+        void loadMoreRef.current().finally(() => {
+          loadingMoreRef.current = false;
+        });
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [hasMoreMovies, movies.length]);
+
   return (
     <section className="page library-page">
       <div className="panel">
@@ -181,11 +211,12 @@ export function LibraryPage({
               }}
               onClick={(event) => handleTileClick(movie, event)}
               onToggleSelect={() => toggleSelected(movie.id)}
+              onPlay={() => onPlayMovie(movie)}
             />
           ))}
         </div>
-        {movies.length < movieTotalCount && (
-          <div className="load-more-bar">
+        {hasMoreMovies && (
+          <div className="load-more-bar" ref={loadMoreBarRef}>
             <span className="load-more-count">{movies.length} of {movieTotalCount} movies</span>
             <button
               className="ghost-button"

@@ -10,6 +10,8 @@ interface MovieTileProps {
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onToggleSelect?: () => void;
+  /** Quick-play overlay button. When provided, a play icon appears on the poster. */
+  onPlay?: () => void;
   separator?: "dash" | "dot";
 }
 
@@ -21,6 +23,7 @@ function MovieTileComponent({
   onContextMenu,
   onClick,
   onToggleSelect,
+  onPlay,
   separator = "dash",
 }: MovieTileProps) {
   const sep = separator === "dot" ? " · " : " - ";
@@ -46,6 +49,22 @@ function MovieTileComponent({
           />
           <span />
         </label>
+      )}
+      {onPlay && (
+        <button
+          aria-label={`Play ${movie.title}`}
+          className="tile-play"
+          onClick={(event) => {
+            event.stopPropagation();
+            onPlay();
+          }}
+          onContextMenu={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          title="Play"
+          type="button"
+        >
+          <span aria-hidden="true">▶</span>
+        </button>
       )}
       <button className="tile-body" onClick={onClick} type="button">
         <PosterVisual movie={movie} />

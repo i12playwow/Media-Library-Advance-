@@ -256,79 +256,77 @@ export async function scanLibraries(
     }
   }
 
-  for (const group of processingGroups) {
-    if (cancelToken?.cancelled) break;
-    let importedFromGroup = false;
+  // ── Bounded-concurrency processing pipeline ──────────────────────────
+  // Groups run in parallel so the network-bound phases (online metadata,
+  // subtitle search, poster download) overlap across movies instead of
+  // running strictly one movie at a time. Each duplicate group still imports
+  // only its best candidate, and candidates inside a group stay sequential.
+  // The filesystem-mutating phase stays serialized via an async lock:
+  // ensureUniquePath()'s exists-check is not atomic across concurrent tasks,
+  // and two different groups can derive the same destination folder.
+  const SCAN_CONCURRENCY = 4;
+  let mutationChain: Promise<unknown> = Promise.resolve();
+  function withMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = mutationChain.then(fn, fn);
+    mutationChain = run.catch(() => undefined);
+    return run;
+  }
 
-    for (const candidate of group) {
-      if (cancelToken?.cancelled) break;
-      onProgress?.({
-        stage: "processing",
-        mode,
-        currentRoot: candidate.root,
-        currentFile: candidate.videoFile,
-        processedFiles,
-        totalFiles,
-        imported,
-        skipped,
-        message: `Processing ${processedFiles + 1} of ${totalFiles}`
-      });
-
-      if (importedFromGroup) {
+  // Processes one candidate end-to-end. Returns true when the candidate was
+  // imported, so the caller can skip the group's lower-quality duplicates.
+  async function processCandidate(candidate: ScanCandidate): Promise<boolean> {
+    if (scanOptions.importOnlyCompleteVideos) {
+      const validation = await validateCandidateBeforeImport(candidate.videoFile);
+      if (!validation.ok) {
         skipped += 1;
+        invalidFiles.push({
+          path: candidate.videoFile,
+          reason: validation.reason,
+          status: validation.status
+        });
         errors.push(
-          `${candidate.mode}:${candidate.videoFile} - Skipped lower-quality duplicate.`
+          `${candidate.mode}:${candidate.videoFile} - ${validation.reason}`
         );
         processedFiles += 1;
-        continue;
+        return false;
       }
+    }
 
-      if (scanOptions.importOnlyCompleteVideos) {
-        const validation = await validateCandidateBeforeImport(candidate.videoFile);
-        if (!validation.ok) {
-          skipped += 1;
-          invalidFiles.push({
-            path: candidate.videoFile,
-            reason: validation.reason,
-            status: validation.status
-          });
-          errors.push(
-            `${candidate.mode}:${candidate.videoFile} - ${validation.reason}`
-          );
-          processedFiles += 1;
-          continue;
-        }
-      }
-
-      try {
-        const onlineMetadata = await resolveOnlineImportMetadata(
+    try {
+      // Online metadata, .nfo sidecar and subtitle search are independent of
+      // each other, so they run concurrently — the subtitle search used to be
+      // serialized behind the whole metadata scrape chain.
+      const [onlineMetadata, nfoData, subtitles] = await Promise.all([
+        resolveOnlineImportMetadata(
           candidate.mode,
           candidate.parsed.videoId,
           candidate.parsed.title,
           candidate.parsed.year,
           candidate.videoFile,
           metadataSettings
-        );
+        ),
         // Read .nfo sidecar for metadata (actresses, title, etc.)
-        const nfoData = await readNfoMetadata(candidate.videoFile);
+        readNfoMetadata(candidate.videoFile),
+        scanOptions.autoMatchSubtitle
+          ? findMatchingSubtitleCandidates(candidate.videoFile)
+          : Promise.resolve([])
+      ]);
 
-        // Merge actress info: online > nfo > empty
-        const resolvedVideoId = onlineMetadata?.videoId ?? candidate.parsed.videoId;
-        const actresses = onlineMetadata?.actresses?.length
-          ? onlineMetadata.actresses
-          : nfoData.actresses?.length
-            ? nfoData.actresses
-            : [];
-
-        // Fetch actress profile photos in background (best-effort)
-        if (actresses.length > 0) {
-          void enrichActressPhotos(database, actresses);
-        }
-        const subtitles = scanOptions.autoMatchSubtitle
-          ? await findMatchingSubtitleCandidates(candidate.videoFile)
+      // Merge actress info: online > nfo > empty
+      const resolvedVideoId = onlineMetadata?.videoId ?? candidate.parsed.videoId;
+      const actresses = onlineMetadata?.actresses?.length
+        ? onlineMetadata.actresses
+        : nfoData.actresses?.length
+          ? nfoData.actresses
           : [];
 
-        const processed = await applyProcessingOptions({
+      // Fetch actress profile photos in background (best-effort)
+      if (actresses.length > 0) {
+        void enrichActressPhotos(database, actresses);
+      }
+
+      const processed = await withMutationLock(() =>
+        applyProcessingOptions({
           libraryMode: candidate.mode,
           root: candidate.root,
           videoPath: candidate.videoFile,
@@ -340,7 +338,8 @@ export async function scanLibraries(
           subtitles,
           organizationSettings,
           scanOptions
-        });
+        })
+      );
 
         for (const warning of processed.warnings) {
           errors.push(`${candidate.mode}:${processed.videoPath} - ${warning}`);
@@ -373,7 +372,6 @@ export async function scanLibraries(
         });
         database.replaceSubtitles(movieId, subtitleRecords);
         imported += 1;
-        importedFromGroup = scanOptions.importBetterQuality;
 
         try {
           await enrichMoviePoster(database, movieId, metadataSettings, {
@@ -403,14 +401,62 @@ export async function scanLibraries(
         } catch {
           // Best-effort — ignore poster save failures
         }
+        return true;
       } catch (error) {
         skipped += 1;
         errors.push(`${candidate.mode}:${candidate.videoFile} - ${formatError(error)}`);
+        return false;
+      } finally {
+        processedFiles += 1;
       }
+  }
 
-      processedFiles += 1;
+  let nextGroupIndex = 0;
+  async function processGroupsWorker(): Promise<void> {
+    while (!cancelToken?.cancelled) {
+      const index = nextGroupIndex;
+      nextGroupIndex += 1;
+      const group = processingGroups[index];
+      if (!group) return;
+
+      let importedFromGroup = false;
+      for (const candidate of group) {
+        if (cancelToken?.cancelled) break;
+        onProgress?.({
+          stage: "processing",
+          mode,
+          currentRoot: candidate.root,
+          currentFile: candidate.videoFile,
+          processedFiles,
+          totalFiles,
+          imported,
+          skipped,
+          message: `Processing ${processedFiles + 1} of ${totalFiles}`
+        });
+
+        if (importedFromGroup) {
+          skipped += 1;
+          errors.push(
+            `${candidate.mode}:${candidate.videoFile} - Skipped lower-quality duplicate.`
+          );
+          processedFiles += 1;
+          continue;
+        }
+
+        const wasImported = await processCandidate(candidate);
+        if (wasImported) {
+          importedFromGroup = scanOptions.importBetterQuality;
+        }
+      }
     }
   }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(SCAN_CONCURRENCY, processingGroups.length) },
+      () => processGroupsWorker()
+    )
+  );
 
   const wasCancelled = Boolean(cancelToken?.cancelled);
 
