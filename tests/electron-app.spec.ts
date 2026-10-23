@@ -33,7 +33,10 @@ test("Electron app smoke flow covers library, gentle toggle, player, and theme p
 
     await page.locator(".movie-tile").filter({ hasText: "Zeta Feature" }).first().click({ button: "right" });
     await page.getByRole("button", { name: "Open in built-in player" }).click();
-    await expect(page.getByText("Zeta Feature", { exact: true })).toBeVisible();
+    // Opening from the context menu pops the player up in a floating window
+    // (the library stays mounted behind it), so the title is asserted on the
+    // popup header rather than as unique page text.
+    await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
     await page.getByRole("button", { name: "Subtitles" }).click();
     await expect(page.locator("#player-sub-search-query")).toHaveValue("ZZZ-001");
 
