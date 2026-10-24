@@ -6,7 +6,7 @@
     "scripts": {
         "build": "tsc -b && vite build",
         "postinstall": "electron-builder install-app-deps",
-        "start": "npm run rebuild:electron && electron .",
+        "start": "node scripts/setup-doctor.cjs --check --quiet --skip esbuild && npm run rebuild:electron && electron .",
         "dev": "node scripts/dev.cjs",
         "predev": "node scripts/setup-doctor.cjs --check --quiet",
     "rebuild:node": "node scripts/rebuild-node.cjs",
@@ -21,7 +21,7 @@
     "preprobe:tamper": "npm run verify:abi",
     "pretest": "node scripts/setup-doctor.cjs --check --quiet --skip electron && npm run verify:abi",
     "test": "vitest run",
-    "pretest:e2e": "npm run rebuild:electron && npm run verify:abi:electron",
+    "pretest:e2e": "node scripts/setup-doctor.cjs --check --quiet && npm run rebuild:electron && npm run verify:abi:electron",
     "test:e2e": "npm run build && playwright test",
       "dist": "electron-builder --win --x64"
   },
