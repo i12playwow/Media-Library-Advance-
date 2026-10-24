@@ -144,6 +144,32 @@ npm test                      # prove it
 For the e2e suite you do not heal manually: `npm run test:e2e`'s
 `pretest:e2e` hook rebuilds for Electron first (rule 3).
 
+## Both suites in one command
+
+`npm run verify:all` (`scripts/verify-all.cjs`) runs the two suites back to
+back and owns the ABI flips between them, so the dance never has to be juggled
+by hand:
+
+| Leg | Runs | ABI |
+|---|---|---|
+| e2e | `npm run test:e2e` | Electron — `pretest:e2e` heals first (rule 3) |
+| rebuild | `npm run rebuild:node` | Electron → Node |
+| gate | `npm run verify:abi` | Node, proven |
+| unit | `npm test` | Node — its pure `pretest` gate re-proves it |
+
+The Node rebuild runs even when the e2e leg fails, so a red e2e result never
+leaves the tree on the Electron ABI. Once the rebuild and the gate pass, the
+final state is Node-ABI and verified; the unit leg then re-proves it through
+the pure `pretest` gate before Vitest runs. The unit leg is the only one that
+can be skipped — when the Node gate fails, `npm test`'s gate would stop at the
+identical state, so the wrapper prints `SKIP` (never a pass) and points at
+`npm run diagnose:abi`. Every leg's verdict and duration is printed, and the
+exit code is 0 only when every leg that ran passed.
+
+Interrupting the wrapper (Ctrl+C) can leave the binding part-way through a
+rebuild, like any interrupted rebuild; `npm run diagnose:abi -- --fix` returns
+the tree to unit-ready. Drift class 2 pins the script's wiring and leg order.
+
 ## Setup doctor
 
 `npm run doctor` covers the failure neither ABI gate can see: a `node_modules`

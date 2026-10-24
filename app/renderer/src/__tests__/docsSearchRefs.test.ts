@@ -1188,6 +1188,29 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     }
   });
 
+  it("drift class 2: verify:all runs both suites and owns the ABI flip", () => {
+    expect(scripts["verify:all"]).toBe("node scripts/verify-all.cjs");
+    const runnerPath = path.join(repoRoot, "scripts", "verify-all.cjs");
+    expect(fs.existsSync(runnerPath), `${runnerPath} exists`).toBe(true);
+    const runner = fs.readFileSync(runnerPath, "utf8");
+    // The leg order is the contract: e2e heals to the Electron ABI, the Node
+    // rebuild flips back, the gate proves it, and only then do the units run.
+    const at = (needle: string) => runner.indexOf(needle);
+    expect(at('["run", "test:e2e"]'), "verify:all runs the e2e suite").toBeGreaterThan(-1);
+    expect(at('["run", "rebuild:node"]'), "verify:all rebuilds for Node").toBeGreaterThan(-1);
+    expect(at('["run", "verify:abi"]'), "verify:all proves the Node state").toBeGreaterThan(-1);
+    expect(at('"unit suite"'), "verify:all runs the unit suite").toBeGreaterThan(-1);
+    expect(at('["run", "test:e2e"]')).toBeLessThan(at('["run", "rebuild:node"]'));
+    expect(at('["run", "rebuild:node"]')).toBeLessThan(at('["run", "verify:abi"]'));
+    expect(at('["run", "verify:abi"]')).toBeLessThan(at('"unit suite"'));
+    // The rebuild is unconditional — a failed e2e leg must not leave the tree
+    // on the Electron ABI — so its call cannot sit inside the gate branch.
+    const rebuildLine = runner
+      .split("\n")
+      .find((line) => line.includes('["run", "rebuild:node"]'));
+    expect(rebuildLine, "the rebuild leg is a top-level call").toMatch(/^runLeg\(/);
+  });
+
   it("ci.yml parses into the documented jobs", () => {
     expect(Object.keys(jobs).sort()).toEqual(["e2e", "test", "typecheck"]);
     expect(jobs.test.name, "unit job display name").toBe("Unit & Component Tests");
