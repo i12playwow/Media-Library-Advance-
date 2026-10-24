@@ -2473,6 +2473,41 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(liveBranch, "proof failure still exits 1").toContain("process.exit(1)");
   });
 
+  it("drift class 9, rule 3: the Node gate's banner reports the running Node's ABI", () => {
+    // The banner once printed getElectronAbi() — Electron 41's 145 — as the
+    // "expected" version under Node 26, whose own ABI is 147. The verdict was
+    // correct and the number was not, which is the one thing a stripped
+    // machine gets to read. The expectation is the runtime's own ABI.
+    // Comments are stripped first: the fix's own note names the helper it
+    // replaced, and a prose mention must never count as the call.
+    const nodeBranch = stripLineComments(
+      abiCheckSource.slice(
+        abiCheckSource.indexOf('if (mode === "node")'),
+        abiCheckSource.indexOf("// ── Electron mode")
+      )
+    );
+    expect(nodeBranch, "the Node branch is sliced out of the gate").toContain(
+      "expected NODE_MODULE_VERSION"
+    );
+    expect(nodeBranch, "the expected ABI is the running Node's").toContain(
+      "process.versions.modules"
+    );
+    expect(nodeBranch, "the Electron ABI stays out of the Node banner").not.toContain(
+      "getElectronAbi"
+    );
+    expect(nodeBranch, "the banner still names the Node version").toContain(
+      "for Node ${node}"
+    );
+    expect(nodeBranch, "the banner still names the healing command").toContain(
+      "npm run rebuild:node"
+    );
+    // ...and rule 3 says which ABI that number is, so the doc and the banner
+    // cannot drift apart.
+    expect(norm(testingMd), "rule 3 documents where the expected ABI comes from").toContain(
+      "the running Node's own `NODE_MODULE_VERSION`"
+    );
+  });
+
   it("drift class 9, rule 5: the drill probes in-process exactly once, before the finally", () => {
     // Rule 5 is a Windows file-lock invariant: a successful load maps the
     // binding, and the finally's rebuild would then fail. So the drill may
