@@ -24,11 +24,15 @@ lines.push(`abi-check (${mode} mode) — node ${node} · better-sqlite3 ${better
 if (mode === "node") {
   const probe = probeBinding();
   if (probe.kind !== "ok") {
-    const expected = getElectronAbi(electron);
+    // The expectation in THIS runtime is Node's own ABI. Reaching for
+    // getElectronAbi() here printed Electron 41's 145 as the "expected"
+    // version on Node 26 (147) — the verdict stayed right, the one number a
+    // stripped machine is diagnosed by did not.
+    const expected = String(process.versions.modules);
     const bindingAbi = probe.bindingAbi ?? "unknown";
     lines.push(`  binding state: ${probe.kind === "abi" ? `wrong ABI (binding NODE_MODULE_VERSION ${bindingAbi})` : "load failure"}`);
     if (probe.message) lines.push(`  detail: ${probe.message}`);
-    lines.push(`  expected NODE_MODULE_VERSION ${expected ?? "?"} for Node ${node}`);
+    lines.push(`  expected NODE_MODULE_VERSION ${expected} for Node ${node}`);
     lines.push("");
     lines.push("ABI gate FAILED. The binding is not usable in this runtime. Fix with:");
     lines.push("  npm run rebuild:node");
