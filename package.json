@@ -14,6 +14,7 @@
     "verify:abi": "node scripts/abi-check.cjs",
     "verify:abi:electron": "node scripts/abi-check.cjs --electron",
     "verify:drill": "node verify-drill-fire.mjs",
+    "verify:all": "node scripts/verify-all.cjs",
     "diagnose:abi": "node scripts/diagnose-abi.cjs",
     "doctor": "node scripts/setup-doctor.cjs",
     "drill:abi": "node scripts/drill-abi-contract.cjs",

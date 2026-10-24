@@ -176,22 +176,26 @@ function npmCliPath() {
   return fs.existsSync(candidate) ? candidate : null;
 }
 
-function runNpm(args, timeoutMs = 600000) {
+// `options.stdio` defaults to "pipe" (the drill and the appenders read the
+// output); "inherit" streams a long suite straight to the terminal for the
+// verify:all wrapper, in which case `output` stays empty by design.
+function runNpm(args, timeoutMs = 600000, options = {}) {
+  const stdio = options.stdio ?? "pipe";
+  const base = {
+    cwd: REPO_ROOT,
+    timeout: timeoutMs,
+    shell: false,
+    stdio,
+    ...(stdio === "pipe" ? { encoding: "utf8" } : {}),
+  };
   const npmCli = npmCliPath();
   const res = npmCli
-    ? spawnSync(process.execPath, [npmCli, ...args], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        timeout: timeoutMs,
-        shell: false,
-      })
-    : spawnSync("npm", args, {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        timeout: timeoutMs,
-        shell: process.platform === "win32",
-      });
-  return { status: res.status, output: `${res.stdout || ""}\n${res.stderr || ""}` };
+    ? spawnSync(process.execPath, [npmCli, ...args], base)
+    : spawnSync("npm", args, { ...base, shell: process.platform === "win32" });
+  return {
+    status: res.status,
+    output: stdio === "pipe" ? `${res.stdout || ""}\n${res.stderr || ""}` : "",
+  };
 }
 
 function getCommitSha() {
