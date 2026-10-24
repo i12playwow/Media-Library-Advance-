@@ -10,8 +10,16 @@
 // before launching. Neither ABI gate can report that state usefully: they
 // assume an installed tree.
 //
-//   npm run doctor            → detect and repair, exit 0 only if both are usable
-//   npm run doctor -- --check → detect only, exit 1 when unhealthy
+//   npm run doctor                     → detect and repair, exit 0 only if both are usable
+//   npm run doctor -- --check          → detect only, exit 1 when unhealthy
+//   npm run doctor -- --check --quiet  → silent when green (used as a preflight)
+//   ... --check --skip electron        → only the binaries this command needs
+//
+// `npm test` preflights esbuild and `npm run dev` preflights both, so a tree
+// stripped by an interrupted install fails in one sentence instead of inside
+// vite's config loader. The test preflight skips Electron deliberately: vitest
+// needs the transform, not the Electron runtime, and a broken Electron install
+// must not block unit tests.
 //
 // Repairs are deliberately scoped to downloads the packages own:
 //   esbuild  → node node_modules/esbuild/install.js (its own downloader),
@@ -30,7 +38,21 @@ const { ELECTRON_BIN, runNpm } = require("./lib/abi-state.cjs");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const NM = path.join(REPO_ROOT, "node_modules");
-const CHECK_ONLY = process.argv.includes("--check");
+const argv = process.argv.slice(2);
+const CHECK_ONLY = argv.includes("--check");
+// Preflights have nothing useful to say on the green path; --quiet keeps
+// `npm run dev` from printing a banner on every restart.
+const QUIET = argv.includes("--quiet");
+const SKIP = new Set(
+  argv
+    .flatMap((arg, index) => {
+      if (arg === "--skip") return String(argv[index + 1] || "").split(",");
+      if (arg.startsWith("--skip=")) return arg.slice("--skip=".length).split(",");
+      return [];
+    })
+    .map((name) => name.trim())
+    .filter(Boolean)
+);
 
 function readJson(file) {
   try {
@@ -241,7 +263,8 @@ function repairElectron() {
 // ── report ──────────────────────────────────────────────────────────────────
 
 const lines = [
-  `setup-doctor — node ${process.version} · ${process.platform}-${process.arch}${CHECK_ONLY ? " · check only" : ""}`,
+  `setup-doctor — node ${process.version} · ${process.platform}-${process.arch}` +
+    `${CHECK_ONLY ? " · check only" : ""}${SKIP.size > 0 ? ` · skip ${[...SKIP].join(",")}` : ""}`,
 ];
 
 if (!exists(NM)) {
@@ -267,8 +290,21 @@ const targets = [
   },
 ];
 
+// A typo in --skip must not silently select everything (that would make the
+// test preflight depend on Electron again), so unknown names are fatal.
+const unknown = [...SKIP].filter((name) => !targets.some((target) => target.name === name));
+if (unknown.length > 0) {
+  process.stderr.write(
+    `setup-doctor: unknown --skip target(s): ${unknown.join(", ")} ` +
+      `(known: ${targets.map((target) => target.name).join(", ")})\n`
+  );
+  process.exit(2);
+}
+
+const selected = targets.filter((target) => !SKIP.has(target.name));
+
 let failed = 0;
-for (const target of targets) {
+for (const target of selected) {
   const label = `${target.name}${target.version ? ` ${target.version}` : ""}`.padEnd(20);
   const before = target.check();
   if (before.ok) {
@@ -304,9 +340,10 @@ if (failed > 0) {
 }
 
 lines.push("");
+const checked = selected.map((target) => target.name).join(" and ");
 lines.push(
   CHECK_ONLY
-    ? "Doctor green: esbuild and Electron runtimes are present."
-    : "Doctor green: esbuild and Electron runtimes are present (binding untouched)."
+    ? `Doctor green: ${checked} present.`
+    : `Doctor green: ${checked} present (binding untouched).`
 );
-process.stdout.write(`${lines.join("\n")}\n`);
+if (!QUIET) process.stdout.write(`${lines.join("\n")}\n`);

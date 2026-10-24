@@ -16,7 +16,7 @@ something in the repo (see the "State of the guards" table in
 
 | Suite | Command | What it covers |
 |---|---|---|
-| ABI gate | `npm run verify:abi` (via `pretest`) | better-sqlite3 loads **and works** in the current runtime |
+| ABI gate | `npm run verify:abi` (via `pretest`, after the setup doctor's preflight) | better-sqlite3 loads **and works** in the current runtime |
 | Unit + component | `npm test` (gate + Vitest) | utils, videoId, components, DB/fileService integration, doc-citation lints |
 | End-to-end | `npm run test:e2e` (`pretest:e2e` + build + Playwright) | the real Electron app against a throwaway profile |
 
@@ -55,7 +55,10 @@ enforcer).
 
 **Rule 3 — The hooks are asymmetric.** `pretest` is a **pure gate**: it never
 rebuilds, never touches the binding — on a mismatch it prints the offending
-`NODE_MODULE_VERSION`s and exits 1. `pretest:e2e` **self-heals**: it runs
+`NODE_MODULE_VERSION`s and exits 1. It runs the setup doctor's `--check`
+first (see [Setup doctor](#setup-doctor)), which is pure in the same sense:
+it reports a stripped tree, it never repairs one. `pretest:e2e`
+**self-heals**: it runs
 `rebuild:electron` first, then the Electron-mode gate. The asymmetry is
 deliberate: unit tests should surface a machine problem instead of silently
 repairing it, while the e2e flow is allowed to spend the rebuild time because
@@ -150,9 +153,19 @@ esbuild platform, and the e2e suite never launches — neither symptom mentions
 the binding, so the ABI scripts have nothing to diagnose.
 
 ```bash
-npm run doctor            # detect and repair; exit 0 only if both run
-npm run doctor -- --check # detect only, exit 1 when unhealthy
+npm run doctor                      # detect and repair; exit 0 only if both run
+npm run doctor -- --check           # detect only, exit 1 when unhealthy
+npm run doctor -- --check --quiet   # same, silent when green
 ```
+
+`npm test` and `npm run dev` run this check themselves before doing anything,
+so a stripped tree fails in one sentence naming the broken binary and the
+repair command instead of inside vite's config loader. The test hook checks
+esbuild only (`--skip electron`): vitest needs the transform, not the Electron
+runtime, so a broken Electron install must not block unit tests. The dev hook
+checks both. A typo in `--skip` is a hard error rather than a silently wider
+check, and `--quiet` suppresses the green banner so a dev restart stays
+readable.
 
 The repair re-runs only what the packages own: esbuild's installer (then
 `npm rebuild esbuild` as a fallback), and Electron's installer followed — when
