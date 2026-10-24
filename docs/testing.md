@@ -16,7 +16,7 @@ something in the repo (see the "State of the guards" table in
 
 | Suite | Command | What it covers |
 |---|---|---|
-| ABI gate | `npm run verify:abi` (via `pretest`) | better-sqlite3 loads **and works** in the current runtime |
+| ABI gate | `npm run verify:abi` (via `pretest`, after the setup doctor's preflight) | better-sqlite3 loads **and works** in the current runtime |
 | Unit + component | `npm test` (gate + Vitest) | utils, videoId, components, DB/fileService integration, doc-citation lints |
 | End-to-end | `npm run test:e2e` (`pretest:e2e` + build + Playwright) | the real Electron app against a throwaway profile |
 
@@ -55,8 +55,11 @@ enforcer).
 
 **Rule 3 — The hooks are asymmetric.** `pretest` is a **pure gate**: it never
 rebuilds, never touches the binding — on a mismatch it prints the offending
-`NODE_MODULE_VERSION`s and exits 1. `pretest:e2e` **self-heals**: it runs
-`rebuild:electron` first, then the Electron-mode gate. The asymmetry is
+`NODE_MODULE_VERSION`s and exits 1. It runs the setup doctor's `--check`
+first (see [Setup doctor](#setup-doctor)), which is pure in the same sense:
+it reports a stripped tree, it never repairs one. `pretest:e2e`
+**self-heals**: after the same check it runs `rebuild:electron`, then the
+Electron-mode gate. The asymmetry is
 deliberate: unit tests should surface a machine problem instead of silently
 repairing it, while the e2e flow is allowed to spend the rebuild time because
 it always needs the Electron ABI. Drill legs 4/5 vs 6 prove both behaviors on
@@ -72,8 +75,9 @@ reported as such on success — and that fallback is deliberately strict: if the
 binding *loads under Node* while `node-abi` says the Electron ABI differs, the
 gate **fails** ("binding is Node-ABI, not Electron-ABI"), because a
 Node-loadable binding is evidence *against* the Electron ABI whenever the two
-ABIs differ. Install the Electron runtime (one `npm run start` downloads it)
-and the gate proves the state live. This rule is enforced as drift class 9:
+ABIs differ. Install the Electron runtime — `npm ci` on a fresh clone, or
+`npm run doctor` to repair a tree that lost its executables — and the gate
+proves the state live. This rule is enforced as drift class 9:
 the lint pins the `ELECTRON_RUN_AS_NODE` spawn, the `--run-proof` child
 entrypoint, the FTS5-only green verdict, the `electronRuntimePresent` gate on
 the fallback, and the fallback's quoted failure message — in script source.
@@ -150,9 +154,22 @@ esbuild platform, and the e2e suite never launches — neither symptom mentions
 the binding, so the ABI scripts have nothing to diagnose.
 
 ```bash
-npm run doctor            # detect and repair; exit 0 only if both run
-npm run doctor -- --check # detect only, exit 1 when unhealthy
+npm run doctor                      # detect and repair; exit 0 only if both run
+npm run doctor -- --check           # detect only, exit 1 when unhealthy
+npm run doctor -- --check --quiet   # same, silent when green
 ```
+
+`npm test`, `npm run dev`, `npm run test:e2e` and `npm start` run this check
+themselves before doing anything, so a stripped tree fails in one sentence
+naming the broken binary and the repair command instead of inside vite's
+config loader or Electron's "failed to install correctly". The unit hook skips
+the target it does not need (`--skip electron`): vitest needs the transform,
+not the Electron runtime, so a broken Electron install must not block unit
+tests. `npm start` skips esbuild the same way — it rebuilds the binding and
+launches a prebuilt app, but compiles no JavaScript — while `npm run dev` and
+`npm run test:e2e` check both. A typo
+in `--skip` is a hard error rather than a silently wider check, and `--quiet`
+suppresses the green banner so a dev restart stays readable.
 
 The repair re-runs only what the packages own: esbuild's installer (then
 `npm rebuild esbuild` as a fallback), and Electron's installer followed — when

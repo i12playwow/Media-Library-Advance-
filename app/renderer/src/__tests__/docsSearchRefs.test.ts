@@ -1140,11 +1140,28 @@ const suiteSourcePaths = trackedFiles
 describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, and 18)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
-    expect(scripts.pretest).toBe("npm run verify:abi");
+    // The doctor preflight leads the hook and is pure itself (`--check`
+    // never repairs), so the hook's promise — nothing here heals — holds
+    // while a tree that lost its executables is named before the ABI gate
+    // gets a chance to mislead.
+    expect(scripts.pretest).toBe(
+      "node scripts/setup-doctor.cjs --check --quiet --skip electron && npm run verify:abi"
+    );
     expect(scripts.pretest).not.toMatch(/rebuild/i);
-    expect(scripts["pretest:e2e"]).toBe("npm run rebuild:electron && npm run verify:abi:electron");
+    expect(scripts["pretest:e2e"]).toBe(
+      "node scripts/setup-doctor.cjs --check --quiet && npm run rebuild:electron && npm run verify:abi:electron"
+    );
+    // The doctor's check leads every Electron-facing entrypoint, so a stripped
+    // runtime is named before the rebuild spends its time or Electron refuses
+    // to launch. Both hooks stay check-only: the doctor never repairs here.
+    expect(scripts["pretest:e2e"].indexOf("setup-doctor")).toBeLessThan(
+      scripts["pretest:e2e"].indexOf("rebuild:electron")
+    );
     expect(scripts["pretest:e2e"].indexOf("rebuild:electron")).toBeLessThan(
       scripts["pretest:e2e"].indexOf("verify:abi:electron")
+    );
+    expect(scripts.start).toBe(
+      "node scripts/setup-doctor.cjs --check --quiet --skip esbuild && npm run rebuild:electron && electron ."
     );
     expect(scripts.postinstall).toBe("electron-builder install-app-deps");
   });
