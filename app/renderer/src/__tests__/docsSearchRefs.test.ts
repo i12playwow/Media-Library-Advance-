@@ -1145,7 +1145,12 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // while a tree that lost its executables is named before the ABI gate
     // gets a chance to mislead.
     expect(scripts.pretest).toBe(
-      "node scripts/setup-doctor.cjs --check --quiet --skip electron && npm run verify:abi"
+      "node scripts/setup-doctor.cjs --check --quiet --skip electron,electron-builder && npm run verify:abi"
+    );
+    // dev compiles and launches, it never packages: electron-builder's plain
+    // binaries are not its preflight's business.
+    expect(scripts.predev).toBe(
+      "node scripts/setup-doctor.cjs --check --quiet --skip electron-builder"
     );
     expect(scripts.pretest).not.toMatch(/rebuild/i);
     expect(scripts["pretest:e2e"]).toBe(

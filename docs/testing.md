@@ -176,13 +176,16 @@ the tree to unit-ready. Drift class 2 pins the script's wiring and leg order.
 
 `npm run doctor` covers the failure neither ABI gate can see: a `node_modules`
 that exists but has lost its native executables. An interrupted install leaves
-esbuild's platform package an empty shell and `electron/dist` half-extracted;
-`npm test` then dies while loading `vite.config.ts` with a message about the
-esbuild platform, and the e2e suite never launches — neither symptom mentions
-the binding, so the ABI scripts have nothing to diagnose.
+esbuild's platform package an empty shell, `electron/dist` half-extracted and
+electron-builder's plain binaries — `app-builder` and `7za`, which ship as
+files with no installer — missing; `npm test` then dies while loading
+`vite.config.ts` with a message about the esbuild platform, `rebuild:electron`
+dies inside electron-builder with `spawn ... app-builder.exe ENOENT`, and the
+e2e suite never launches — none of those symptoms mentions the binding, so the
+ABI scripts have nothing to diagnose.
 
 ```bash
-npm run doctor                      # detect and repair; exit 0 only if both run
+npm run doctor                      # detect and repair; exit 0 only if all are usable
 npm run doctor -- --check           # detect only, exit 1 when unhealthy
 npm run doctor -- --check --quiet   # same, silent when green
 ```
@@ -190,23 +193,27 @@ npm run doctor -- --check --quiet   # same, silent when green
 `npm test`, `npm run dev`, `npm run test:e2e` and `npm start` run this check
 themselves before doing anything, so a stripped tree fails in one sentence
 naming the broken binary and the repair command instead of inside vite's
-config loader or Electron's "failed to install correctly". The unit hook skips
-the target it does not need (`--skip electron`): vitest needs the transform,
-not the Electron runtime, so a broken Electron install must not block unit
-tests. `npm start` skips esbuild the same way — it rebuilds the binding and
-launches a prebuilt app, but compiles no JavaScript — while `npm run dev` and
-`npm run test:e2e` check both. A typo
-in `--skip` is a hard error rather than a silently wider check, and `--quiet`
-suppresses the green banner so a dev restart stays readable.
+config loader, Electron's "failed to install correctly" or electron-builder's
+ENOENT. The unit hook skips the targets it does not need (`--skip
+electron,electron-builder`): vitest needs the transform, not the Electron
+runtime or the packaging tools, so a broken install of either must not block
+unit tests. `npm run dev` skips electron-builder for the same reason — it
+compiles and launches, it never packages — while `npm start` skips esbuild
+(it rebuilds the binding and launches a prebuilt app, but compiles no
+JavaScript) and `npm run test:e2e` checks all three. A typo in `--skip` is a
+hard error rather than a silently wider check, and `--quiet` suppresses the
+green banner so a dev restart stays readable.
 
 The repair re-runs only what the packages own: esbuild's installer (then
-`npm rebuild esbuild` as a fallback), and Electron's installer followed — when
-it leaves a locales-only `dist` behind, which a partial extraction on Node 26
-can do — by extracting the cached release zip with the platform's archive
-tool and restoring `path.txt`. The better-sqlite3 binding is never touched, so
-a repaired tree keeps its ABI state: an Electron-ABI checkout stays
-Electron-ABI, and `npm run rebuild:node` is still the way to make it
-unit-ready.
+`npm rebuild esbuild` as a fallback); Electron's installer followed — when it
+leaves a locales-only `dist` behind, which a partial extraction on Node 26 can
+do — by extracting the cached release zip with the platform's archive tool and
+restoring `path.txt`; and, for electron-builder, the `app-builder-bin` and
+`7zip-bin` tarballs fetched with `npm pack`, checked against
+`package-lock.json`'s sha512, and unpacked down to the one missing file. The
+better-sqlite3 binding is never touched, so a repaired tree keeps its ABI
+state: an Electron-ABI checkout stays Electron-ABI, and `npm run rebuild:node`
+is still the way to make it unit-ready.
 
 ## Verifying a scheduled fire
 

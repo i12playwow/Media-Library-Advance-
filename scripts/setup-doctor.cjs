@@ -3,33 +3,42 @@
 // scripts/setup-doctor.cjs — finds the native binaries an interrupted or
 // partial install leaves behind, and repairs them in place.
 //
-// The failure this exists for (observed for real on 2026-10-24): node_modules
-// was present and `npm ci` reported success, yet the tree held no .exe files at
-// all — esbuild's platform package was an empty shell and electron/dist had no
-// runtime, so `npm test` died in config loading and every e2e gate failed
-// before launching. Neither ABI gate can report that state usefully: they
-// assume an installed tree.
+// The failure this exists for (observed for real on 2026-10-24, and again on
+// 2026-10-27): node_modules was present and `npm ci` reported success, yet the
+// tree held almost no .exe files — esbuild's platform package was an empty
+// shell, electron/dist had no runtime, and the plain binaries electron-builder
+// spawns (app-builder, 7za) were gone, so `npm test` died in config loading,
+// `rebuild:electron` died inside electron-builder with ENOENT, and every e2e
+// gate failed before launching. Neither ABI gate can report that state
+// usefully: they assume an installed tree.
 //
-//   npm run doctor                     → detect and repair, exit 0 only if both are usable
+//   npm run doctor                     → detect and repair, exit 0 only if all are usable
 //   npm run doctor -- --check          → detect only, exit 1 when unhealthy
 //   npm run doctor -- --check --quiet  → silent when green (used as a preflight)
 //   ... --check --skip electron        → only the binaries this command needs
 //
-// `npm test` preflights esbuild and `npm run dev` preflights both, so a tree
-// stripped by an interrupted install fails in one sentence instead of inside
-// vite's config loader. The test preflight skips Electron deliberately: vitest
-// needs the transform, not the Electron runtime, and a broken Electron install
-// must not block unit tests.
+// `npm test` preflights esbuild and `npm run dev` preflights esbuild and
+// Electron, so a tree stripped by an interrupted install fails in one sentence
+// instead of inside vite's config loader. The test preflight skips Electron and
+// electron-builder deliberately: vitest needs the transform, not the Electron
+// runtime or the packaging tools, and a broken install of either must not
+// block unit tests.
 //
 // Repairs are deliberately scoped to downloads the packages own:
-//   esbuild  → node node_modules/esbuild/install.js (its own downloader),
-//              falling back to `npm rebuild esbuild`
-//   electron → node node_modules/electron/install.js, then — because that
-//              installer can leave a locales-only dist behind on Node 26 —
-//              an extraction of the cached release zip with the platform's
-//              own archive tool
-// Neither path touches better-sqlite3, so the ABI state survives a repair.
+//   esbuild          → node node_modules/esbuild/install.js (its own downloader),
+//                      falling back to `npm rebuild esbuild`
+//   electron         → node node_modules/electron/install.js, then — because that
+//                      installer can leave a locales-only dist behind on Node 26 —
+//                      an extraction of the cached release zip with the platform's
+//                      own archive tool
+//   electron-builder → app-builder and 7za ship as plain files with no install
+//                      script, so the packaging packages' own published tarballs
+//                      are fetched (npm pack) and integrity-checked against
+//                      package-lock.json before the missing file is copied back
+// None of these paths touches better-sqlite3, so the ABI state survives a
+// repair.
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -260,6 +269,158 @@ function repairElectron() {
   return { ok: true, detail: `extracted ${path.basename(zip)}` };
 }
 
+// ── electron-builder ────────────────────────────────────────────────────────
+
+// electron-builder spawns two plain binaries that ship as files inside their
+// packages — app-builder (app-builder-bin) and 7za (7zip-bin) — with no install
+// script that could restore them. A tree stripped of .exe files therefore kills
+// `rebuild:electron` inside electron-builder (`spawn ... app-builder.exe
+// ENOENT`) before the ABI gate gets a turn. Each package's own index.js exports
+// the exact path it would spawn (honouring USE_SYSTEM_* overrides), so the
+// doctor asks the packages instead of guessing a layout.
+const BUILDER_BINARIES = [
+  { pkg: "app-builder-bin", exportName: "appBuilderPath", label: "app-builder" },
+  { pkg: "7zip-bin", exportName: "path7za", label: "7za" },
+];
+
+// Resolve the package the way electron-builder itself would, so a nested
+// install is found too (npm hoists these today, but the loader is the contract).
+function builderPackageDir(pkg) {
+  try {
+    return path.dirname(
+      require.resolve(`${pkg}/package.json`, { paths: [path.join(NM, "electron-builder"), NM] })
+    );
+  } catch {
+    return null;
+  }
+}
+
+function builderBinary(pkg, exportName, label) {
+  const dir = builderPackageDir(pkg);
+  if (!dir) return { pkg, label, dir: null, file: null, detail: `${pkg} is not installed` };
+  let file;
+  try {
+    file = require(dir)[exportName];
+  } catch (err) {
+    const message = String((err && err.message) || err).split("\n")[0].slice(0, 140);
+    return { pkg, label, dir, file: null, detail: `${pkg} could not resolve its binary: ${message}` };
+  }
+  // USE_SYSTEM_APP_BUILDER / USE_SYSTEM_7ZA make the package return a bare
+  // command name; electron-builder will spawn the system binary, not ours.
+  if (!path.isAbsolute(file)) return { pkg, label, dir, file, system: true };
+  return { pkg, label, dir, file };
+}
+
+function builderBinaries() {
+  return BUILDER_BINARIES.map(({ pkg, exportName, label }) => builderBinary(pkg, exportName, label));
+}
+
+function brokenBuilderBinaries() {
+  return builderBinaries().filter((bin) => !bin.system && (!bin.file || !exists(bin.file)));
+}
+
+function electronBuilderHealthy() {
+  const binaries = builderBinaries();
+  const broken = brokenBuilderBinaries();
+  if (broken.length === 0) {
+    const labels = binaries.map((bin) => (bin.system ? `${bin.label} (system)` : bin.label));
+    return { ok: true, detail: `${labels.join(" + ")} present` };
+  }
+  return {
+    ok: false,
+    detail: broken
+      .map((bin) =>
+        bin.file
+          ? `${bin.label} (${path.relative(REPO_ROOT, bin.file)}) is missing`
+          : bin.detail
+      )
+      .join("; "),
+  };
+}
+
+// `npm pack` fetches the package's own published tarball (or the copy npm ci
+// already cached), i.e. the same artifact npm ci would have installed. Its
+// sha512 is checked against package-lock.json before anything is copied, so a
+// corrupted cache cannot be laundered into node_modules.
+function packTarball(pkg, version, destination) {
+  const dir = path.join(destination, pkg.replace(/[\\/]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  const res = runNpm(["pack", `${pkg}@${version}`, "--pack-destination", dir, "--silent"]);
+  if (res.status !== 0) return { error: `npm pack ${pkg}@${version} exited ${res.status}` };
+  const tarball = fs.readdirSync(dir).find((name) => name.endsWith(".tgz"));
+  if (!tarball) return { error: `npm pack ${pkg}@${version} produced no tarball` };
+  return { tarball: path.join(dir, tarball) };
+}
+
+function verifyTarball(tarball, pkg) {
+  const lock = readJson(path.join(REPO_ROOT, "package-lock.json"));
+  const integrity = lock?.packages?.[`node_modules/${pkg}`]?.integrity ?? null;
+  if (!integrity) return { ok: true, detail: "no lockfile entry to compare" };
+  const expected = integrity.startsWith("sha512-") ? integrity.slice("sha512-".length) : integrity;
+  const actual = crypto.createHash("sha512").update(fs.readFileSync(tarball)).digest("base64");
+  return { ok: actual === expected };
+}
+
+// A package tarball is gzip, which System32\tar.exe (bsdtar) reads directly.
+// The PATH fallback is GNU tar, whose `host:path` syntax misreads a Windows
+// drive letter as a remote host, so --force-local is passed there.
+function extractTarball(tarball, destination) {
+  if (process.platform === "win32") {
+    const bsdtar = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+    if (exists(bsdtar)) {
+      const viaBsdtar = run(bsdtar, ["-xzf", tarball, "-C", destination]);
+      if (viaBsdtar.status === 0) return viaBsdtar;
+    }
+    return run("tar", ["--force-local", "-xzf", tarball, "-C", destination]);
+  }
+  return run("tar", ["-xzf", tarball, "-C", destination]);
+}
+
+function repairElectronBuilder() {
+  const broken = brokenBuilderBinaries();
+  if (broken.length === 0) return { ok: true, detail: "nothing to repair" };
+  const absent = broken.filter((bin) => !bin.dir);
+  if (absent.length > 0) {
+    return {
+      ok: false,
+      detail: `${absent.map((bin) => bin.pkg).join(", ")} not installed — reinstall the tree: npm ci`,
+    };
+  }
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "mla-doctor-"));
+  const restored = [];
+  try {
+    for (const bin of broken) {
+      const version = readJson(path.join(bin.dir, "package.json"))?.version;
+      if (!version) return { ok: false, detail: `${bin.pkg} has no readable package.json` };
+
+      const packed = packTarball(bin.pkg, version, temp);
+      if (packed.error) return { ok: false, detail: packed.error };
+      const verified = verifyTarball(packed.tarball, bin.pkg);
+      if (!verified.ok) {
+        return { ok: false, detail: `${bin.pkg}@${version} failed its package-lock integrity check` };
+      }
+
+      const extracted = path.join(temp, `unpacked-${bin.pkg}`);
+      fs.mkdirSync(extracted, { recursive: true });
+      const extraction = extractTarball(packed.tarball, extracted);
+      const relative = path.relative(bin.dir, bin.file);
+      const source = path.join(extracted, "package", relative);
+      if (extraction.status !== 0 || !exists(source)) {
+        return { ok: false, detail: `${bin.pkg}@${version} did not carry ${relative}` };
+      }
+
+      fs.mkdirSync(path.dirname(bin.file), { recursive: true });
+      fs.copyFileSync(source, bin.file);
+      if (process.platform !== "win32") fs.chmodSync(bin.file, 0o755);
+      restored.push(bin.label);
+    }
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+  return { ok: true, detail: `restored ${restored.join(" + ")} from the published package` };
+}
+
 // ── report ──────────────────────────────────────────────────────────────────
 
 const lines = [
@@ -288,6 +449,12 @@ const targets = [
     check: electronHealthy,
     repair: repairElectron,
   },
+  {
+    name: "electron-builder",
+    version: readJson(path.join(NM, "electron-builder", "package.json"))?.version ?? null,
+    check: electronBuilderHealthy,
+    repair: repairElectronBuilder,
+  },
 ];
 
 // A typo in --skip must not silently select everything (that would make the
@@ -303,9 +470,16 @@ if (unknown.length > 0) {
 
 const selected = targets.filter((target) => !SKIP.has(target.name));
 
+const labelWidth = Math.max(
+  ...selected.map(
+    (target) => `${target.name}${target.version ? ` ${target.version}` : ""}`.length
+  )
+);
+const indent = "".padEnd(labelWidth);
+
 let failed = 0;
 for (const target of selected) {
-  const label = `${target.name}${target.version ? ` ${target.version}` : ""}`.padEnd(20);
+  const label = `${target.name}${target.version ? ` ${target.version}` : ""}`.padEnd(labelWidth);
   const before = target.check();
   if (before.ok) {
     lines.push(`  ${label} ok     ${before.detail}`);
@@ -317,14 +491,14 @@ for (const target of selected) {
     continue;
   }
   lines.push(`  ${label} missing ${before.detail}`);
-  lines.push(`  ${"".padEnd(20)} repairing...`);
+  lines.push(`  ${indent} repairing...`);
   const repaired = target.repair();
   const after = target.check();
   if (repaired.ok && after.ok) {
-    lines.push(`  ${"".padEnd(20)} repaired ${repaired.detail}`);
+    lines.push(`  ${indent} repaired ${repaired.detail}`);
   } else {
     failed += 1;
-    lines.push(`  ${"".padEnd(20)} FAILED   ${repaired.detail}`);
+    lines.push(`  ${indent} FAILED   ${repaired.detail}`);
   }
 }
 
@@ -340,7 +514,8 @@ if (failed > 0) {
 }
 
 lines.push("");
-const checked = selected.map((target) => target.name).join(" and ");
+const names = selected.map((target) => target.name);
+const checked = names.length > 2 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join(" and ");
 lines.push(
   CHECK_ONLY
     ? `Doctor green: ${checked} present.`
