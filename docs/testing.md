@@ -55,9 +55,11 @@ enforcer).
 
 **Rule 3 — The hooks are asymmetric.** `pretest` is a **pure gate**: it never
 rebuilds, never touches the binding — on a mismatch it prints the offending
-`NODE_MODULE_VERSION`s and exits 1. It runs the setup doctor's `--check`
-first (see [Setup doctor](#setup-doctor)), which is pure in the same sense:
-it reports a stripped tree, it never repairs one. `pretest:e2e`
+`NODE_MODULE_VERSION`s and exits 1, expecting the running Node's own
+`NODE_MODULE_VERSION` (never Electron's) and naming the healing command. It
+runs the setup doctor's `--check` first (see [Setup doctor](#setup-doctor)),
+which is pure in the same sense: it reports a stripped tree, it never repairs
+one. `pretest:e2e`
 **self-heals**: after the same check it runs `rebuild:electron`, then the
 Electron-mode gate. The asymmetry is
 deliberate: unit tests should surface a machine problem instead of silently
