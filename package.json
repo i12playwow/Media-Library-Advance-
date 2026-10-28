@@ -3,6 +3,9 @@
     "version": "1.0.0",
     "description": "MLA+ desktop media library app",
     "main": "dist/main/main.js",
+    "engines": {
+        "node": ">=22.12.0 <27"
+    },
     "scripts": {
         "build": "tsc -b && vite build",
         "postinstall": "electron-builder install-app-deps",
