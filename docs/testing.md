@@ -5,12 +5,59 @@ MLA+ runs its JavaScript in two different runtimes against one native module:
 - **Node** runs the Vitest unit suite (`npm test`).
 - **Electron** runs the app and the Playwright e2e suite (`npm run test:e2e`).
 
-`better-sqlite3` is compiled for one `NODE_MODULE_VERSION` at a time. On a
-current machine those are **137 for Node 24** and **145 for Electron 41** — a
+`better-sqlite3` is compiled for one `NODE_MODULE_VERSION` at a time. The
+number moves with the runtime — **127 under Node 22** (the line CI pins) and
+**145 under Electron 41** (what the app and the e2e suite load) — and a
 binding built for one is unloadable in the other. Everything in this document
 follows from that one fact, and every contract stated here is enforced by
 something in the repo (see the "State of the guards" table in
 [CONTRIBUTING.md](../CONTRIBUTING.md)).
+
+## Node versions
+
+The supported runtime is declared once, in `package.json`:
+
+```json
+"engines": { "node": ">=22.12.0 <27" }
+```
+
+The floor is the oldest line CI exercises (22) at the earliest patch line
+Vite 8 accepts on it (22.12.0, from its `^20.19.0 || >=22.12.0`); the ceiling
+is better-sqlite3 12.x's own declared range (`20.x || 22.x || 23.x || 24.x ||
+25.x || 26.x`), so the declaration admits every line the native module
+supports — LTS or not. No `engine-strict` is set, so npm only warns
+(`EBADENGINE`) on a mismatch: the field makes drift visible, it never blocks
+an install.
+
+The setup doctor reads the same field on every entrypoint that runs it
+(`npm test`, `npm run dev`, `npm run test:e2e`, `npm start`) and prints a
+warning when the running Node falls outside it — including under
+`--quiet`, because the warning is not a green path. It never changes the exit
+code: the declaration makes drift visible, it does not gate the suite, and a
+newer line must not be blocked from running the unit tests.
+
+CI pins `node-version: 22` in every job that installs Node (`ci.yml`,
+`drill.yml`, `drift-lint.yml`; the label-gated `pr-e2e.yml` caller reuses
+`ci.yml`'s e2e job), while a dev machine is often newer — a local
+`verify:all` run on Node 26 is green. The ABI expectation differs per
+runtime, so the numbers are stated per version:
+
+| Runtime | `NODE_MODULE_VERSION` |
+|---|---|
+| Node 22 (CI) | 127 |
+| Node 24 | 137 |
+| Node 25 | 141 |
+| Node 26 (current local) | 147 |
+| Electron 41 | 145 |
+
+The Node gate computes its expectation from the running Node's own
+`process.versions.modules` (rule 3), so a green local run on a newer Node
+proves that Node's ABI — never CI's. It is also no substitute for the Node-22
+job for another reason: only CI exercises `npm ci`'s postinstall state and a
+from-scratch typecheck on the pinned line (see [CI](#ci)). Node 26
+additionally prints a DEP0205 warning from Playwright's `module.register()`
+during the e2e leg; it is cosmetic, CI's Node 22 stays silent, and no verdict
+is derived from stderr.
 
 ## The suites
 
@@ -203,6 +250,13 @@ compiles and launches, it never packages — while `npm start` skips esbuild
 JavaScript) and `npm run test:e2e` checks all three. A typo in `--skip` is a
 hard error rather than a silently wider check, and `--quiet` suppresses the
 green banner so a dev restart stays readable.
+
+The doctor also compares the running Node against `package.json`'s
+`engines.node` and warns — a short block on stderr, exit code untouched —
+when it is outside that range, naming the declared range and pointing at
+[Node versions](#node-versions). It is a diagnostic, never a repair: no
+entrypoint can switch the Node it was launched with, and the warning survives
+`--quiet` because the preflights run that way on the green path.
 
 The repair re-runs only what the packages own: esbuild's installer (then
 `npm rebuild esbuild` as a fallback); Electron's installer followed — when it

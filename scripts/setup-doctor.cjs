@@ -24,6 +24,14 @@
 // runtime or the packaging tools, and a broken install of either must not
 // block unit tests.
 //
+// Independently of the binaries, the doctor compares the running Node against
+// `package.json`'s `engines.node` and prints one warning when it falls outside
+// that range. The warning never changes the exit code — no entrypoint can
+// switch the Node it was launched with, and a newer line must not be blocked
+// from running the suite — but it prints under `--quiet` too, because that is
+// how every entrypoint runs it on the green path. The comparison itself lives
+// in `scripts/lib/node-engines.cjs`, unit-tested apart from this script.
+//
 // Repairs are deliberately scoped to downloads the packages own:
 //   esbuild          → node node_modules/esbuild/install.js (its own downloader),
 //                      falling back to `npm rebuild esbuild`
@@ -44,6 +52,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { ELECTRON_BIN, runNpm } = require("./lib/abi-state.cjs");
+const { satisfiesRange } = require("./lib/node-engines.cjs");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const NM = path.join(REPO_ROOT, "node_modules");
@@ -427,6 +436,15 @@ const lines = [
   `setup-doctor — node ${process.version} · ${process.platform}-${process.arch}` +
     `${CHECK_ONLY ? " · check only" : ""}${SKIP.size > 0 ? ` · skip ${[...SKIP].join(",")}` : ""}`,
 ];
+
+const enginesRange = readJson(path.join(REPO_ROOT, "package.json"))?.engines?.node;
+if (enginesRange && satisfiesRange(process.version, enginesRange) === false) {
+  process.stderr.write(
+    `setup-doctor: warning — node ${process.version} is outside package.json engines "${enginesRange}".\n` +
+      "  CI runs the version pinned in .github/workflows/ci.yml; see docs/testing.md (Node versions).\n" +
+      "  Continuing — this warning never fails the run.\n"
+  );
+}
 
 if (!exists(NM)) {
   lines.push("  node_modules: absent — nothing to doctor.");

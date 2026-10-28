@@ -187,6 +187,17 @@ import path from "node:path";
 //     detector is self-tested against a real call and a lookalike, so it
 //     cannot go silently inert.
 //
+//   drift class 19 — the Node-version warning cannot drift from the range it
+//     polices: package.json's `engines.node` is the one declaration, and the
+//     setup doctor must read it at runtime — never freeze a range into its
+//     own source — then interpolate that live range and the running version
+//     into a stderr warning that sits before the node_modules gate (so a
+//     stripped tree still hears it), exits nothing, and survives the
+//     `--quiet` preflights; the evaluator itself lives in
+//     scripts/lib/node-engines.cjs and is required, never duplicated inline.
+//     testing.md's Node-versions block must display the same range, so
+//     widening the declaration without the doc fails.
+//
 // Layer 1 is this one file; extend the catalog, don't retire it.
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
@@ -1137,7 +1148,18 @@ const suiteSourcePaths = trackedFiles
   )
   .sort();
 
-describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, and 18)", () => {
+// ── drift class 19 data: the doctor's engines preflight ↔ package.json ─────
+// The range is read from the same package.json the doctor reads at runtime,
+// never retyped here; testing.md's displayed block is compared against it.
+const setupDoctorSource = fs.readFileSync(
+  path.join(repoRoot, "scripts", "setup-doctor.cjs"),
+  "utf8"
+);
+const declaredNodeRange = String(
+  (pkg as { engines?: { node?: unknown } }).engines?.node ?? ""
+);
+
+describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, and 19)", () => {
   // ── drift class 2 — package.json's hook bodies match their claims ─────────
   it("drift class 2: pretest is a pure gate; pretest:e2e self-heals; postinstall leaves the Electron ABI", () => {
     // The doctor preflight leads the hook and is pure itself (`--check`
@@ -2723,6 +2745,63 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     const lookalike = 'require("node:module").stripScriptTypes';
     expect(EXPERIMENTAL_API_RE.test(realCall), "the API name is caught").toBe(true);
     expect(EXPERIMENTAL_API_RE.test(lookalike), "a lookalike is not caught").toBe(false);
+  });
+
+  // ── drift class 19 — the engines warning ↔ the declared range ─────────────
+  it("drift class 19: the doctor's engines warning reads the live declaration, warns on stderr, and never gates", () => {
+    // One source of truth: the declaration lives in package.json and the
+    // doctor must resolve it from there at runtime.
+    expect(declaredNodeRange, "package.json declares engines.node").not.toBe("");
+    expect(setupDoctorSource, "the doctor reads engines.node out of package.json").toContain(
+      'const enginesRange = readJson(path.join(REPO_ROOT, "package.json"))?.engines?.node;'
+    );
+
+    // The warning must interpolate the live range and the running version; a
+    // frozen copy would keep describing a range nobody uses.
+    const warningLine = setupDoctorSource
+      .split("\n")
+      .find((line) => line.includes("setup-doctor: warning"));
+    expect(warningLine, "the engines warning exists").toBeDefined();
+    expect(warningLine, "the warning names the running Node").toContain("${process.version}");
+    expect(warningLine, "the warning prints the declared range").toContain("${enginesRange}");
+    expect(
+      warningLine,
+      "the range is never frozen into the warning text"
+    ).not.toContain(declaredNodeRange);
+
+    // The preflight sits in the report path, before the node_modules early
+    // exit, so a stripped tree still hears it; it writes to stderr (a warning
+    // is not the green banner) and never exits or blocks on --quiet.
+    const preflightAt = setupDoctorSource.indexOf("const enginesRange =");
+    const nodeModulesGateAt = setupDoctorSource.indexOf("if (!exists(NM))");
+    expect(preflightAt, "the preflight exists in the report path").toBeGreaterThan(-1);
+    expect(nodeModulesGateAt, "the node_modules gate is still there").toBeGreaterThan(
+      preflightAt
+    );
+    // The grammar lives in its own module (unit-tested in nodeEngines.test.ts),
+    // so the doctor cannot drift a second, inline copy of the evaluator.
+    expect(setupDoctorSource, "the evaluator is required from its module").toContain(
+      'const { satisfiesRange } = require("./lib/node-engines.cjs");'
+    );
+    expect(
+      setupDoctorSource,
+      "the evaluator is not duplicated in the doctor"
+    ).not.toContain("function expandComparator");
+    const preflight = setupDoctorSource.slice(preflightAt, nodeModulesGateAt);
+    expect(preflight, "the preflight evaluates the declared range").toContain(
+      "satisfiesRange(process.version, enginesRange) === false"
+    );
+    expect(preflight, "the warning goes to stderr").toContain("process.stderr.write");
+    expect(preflight, "a warning never fails the run").not.toContain("process.exit");
+    expect(preflight, "the warning survives --quiet preflights").not.toContain("QUIET");
+  });
+
+  it("drift class 19: testing.md's Node-versions block shows the same range package.json declares", () => {
+    const docRange = /"engines": \{ "node": "([^"]+)" \}/.exec(testingMd);
+    expect(docRange, "testing.md displays the engines declaration").not.toBeNull();
+    expect(docRange![1], "the displayed range equals the declared range").toBe(
+      declaredNodeRange
+    );
   });
 
   // ── drift class 10 — the lint watches itself ──────────────────────────────
