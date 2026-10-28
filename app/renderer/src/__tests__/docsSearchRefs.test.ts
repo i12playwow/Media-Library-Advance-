@@ -142,8 +142,12 @@ import path from "node:path";
 //     the npm filter, with the suite-wide ABI rebuild wired before it (the
 //     pure pretest gate would otherwise abort on the postinstall Electron
 //     ABI); and it must stay read-only with a bounded step appetite — no
-//     write grant, no e2e, no unfiltered suite. Deleting the heartbeat or
-//     quietly widening it into a second full-suite runner fails npm test.
+//     write grant, no e2e, no unfiltered suite. Its own description is
+//     checked too: the header's `drift classes N–M` must name exactly the
+//     range this file enforces — same lowest and highest class, with no gap
+//     between them — so the heartbeat cannot advertise a lint it no longer
+//     runs. Deleting the heartbeat or quietly widening it into a second
+//     full-suite runner fails npm test.
 //
 //   drift class 16 — the scheduled-fire verifier's contract: the
 //     docs/testing.md section that teaches humans to run it sits BEFORE
@@ -1778,6 +1782,39 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     // scans this file too; this pins the count so nothing rides along).
     const uses = [...source.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
     expect(uses.length, "checkout and setup-node only").toBe(2);
+  });
+
+  it("drift class 15: the heartbeat's self-described class range matches the classes the lint enforces", () => {
+    const source = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "drift-lint.yml"), "utf8");
+
+    // Class 14 owns the definition of "enforced": every `drift class N`
+    // mention in this file's raw source. Read the set the same way here so
+    // the two checks cannot disagree about what the lint covers, then hold
+    // the workflow's own prose to it. Comment markers come off first and
+    // whitespace collapses, so the phrase is read as prose: the header wraps
+    // mid-sentence, and a reflow must not turn this guard silently inert.
+    const prose = norm(source.replace(/^#\s?/gm, ""));
+    const declared = /drift classes (\d+)\s*[–-]\s*(\d+)/.exec(prose);
+    expect(declared, "the heartbeat declares its class range").not.toBeNull();
+    const from = Number(declared![1]);
+    const to = Number(declared![2]);
+    const enforced = [
+      ...new Set(
+        [...fs.readFileSync(lintSourcePath, "utf8").matchAll(/drift class (\d+)/g)].map((m) =>
+          Number(m[1])
+        )
+      ),
+    ].sort((a, b) => a - b);
+    expect(from, "the declared range starts at the lowest enforced class").toBe(enforced[0]);
+    expect(to, "the declared range ends at the highest enforced class").toBe(
+      enforced[enforced.length - 1]
+    );
+    // A range is a claim of continuity: if the lint ever skips a class, the
+    // honest description is a list, not `N–M`, and this fails for a rewrite.
+    expect(
+      enforced,
+      "the declared range is contiguous — a range cannot skip a class"
+    ).toEqual(Array.from({ length: to - from + 1 }, (_, index) => from + index));
   });
 
   // ── drift class 14 — the catalog watches itself ───────────────────────────
