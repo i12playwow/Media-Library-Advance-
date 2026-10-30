@@ -345,6 +345,16 @@ better-sqlite3 for Node** runs `npm run rebuild:node` before **Run tests**
 runs `npm test`, so the pure `pretest` gate proves a real Node-ABI state
 rather than the postinstall mismatch.
 
+On the nightly schedule only, **Check the Drift Lint heartbeat** runs
+`node scripts/check-drift-heartbeat.cjs`: it asks the Actions API for the
+newest scheduled `drift-lint.yml` run and fails the job when that run is more
+than 36 hours old — or when none exists at all. Only scheduled fires count: a
+manual dispatch proves the workflow can run, never that its clock still fires,
+and a disabled or dropped schedule otherwise leaves no red run of its own.
+Push, pull-request, and `workflow_call` runs skip the step, so an ordinary
+change never fails on the heartbeat's state; the job grants `actions: read`
+for the API call.
+
 In the e2e job, **Install Electron system dependencies** runs
 `npx playwright install-deps chromium` — Electron needs Chromium's system
 libraries on Linux, and the gate needs them installed to prove the binding

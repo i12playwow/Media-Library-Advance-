@@ -1256,6 +1256,7 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       ["Install dependencies", "npm ci"],
       ["Rebuild better-sqlite3 for Node", "npm run rebuild:node"],
       ["Run tests", "npm test"],
+      ["Check the Drift Lint heartbeat", "node scripts/check-drift-heartbeat.cjs"],
     ]);
     const rebuildSteps = jobs.test.steps.filter((s) => /rebuild/.test(s.run ?? ""));
     expect(rebuildSteps, "exactly the one explicit Node rebuild").toHaveLength(1);
@@ -1815,6 +1816,25 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       enforced,
       "the declared range is contiguous — a range cannot skip a class"
     ).toEqual(Array.from({ length: to - from + 1 }, (_, index) => from + index));
+  });
+
+  // ── drift class 15 — the nightly liveness check ───────────────────────────
+  it("drift class 15: the nightly proves the heartbeat is still firing", () => {
+    // The heartbeat's own red runs are visible; its absence is not. A
+    // schedule-only step in the unit job turns a disabled or dropped fire into
+    // a failed nightly by asking the Actions API for the newest scheduled run.
+    const scriptPath = path.join(repoRoot, "scripts", "check-drift-heartbeat.cjs");
+    expect(fs.existsSync(scriptPath), "the liveness script exists").toBe(true);
+    const script = fs.readFileSync(scriptPath, "utf8");
+    expect(script, "the 36-hour budget is pinned in the script").toContain("MAX_AGE_HOURS = 36");
+    expect(script, "only scheduled fires count as proof").toContain("event=schedule");
+
+    const step = jobs.test.steps.find((s) => s.name === "Check the Drift Lint heartbeat");
+    expect(step, "the liveness check is a real unit-job step").toBeDefined();
+    expect(step!.run, "the step runs the liveness script").toBe(
+      "node scripts/check-drift-heartbeat.cjs"
+    );
+    expect(step!.if, "only the nightly schedule runs it").toBe("github.event_name == 'schedule'");
   });
 
   // ── drift class 14 — the catalog watches itself ───────────────────────────
