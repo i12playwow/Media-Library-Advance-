@@ -31,6 +31,11 @@ jobs:
   test:
     name: Unit & Component Tests
     runs-on: ubuntu-latest
+    # The nightly liveness step reads the Actions API for the heartbeat's
+    # newest scheduled run; checkout still needs contents: read.
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,6 +57,16 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      # Nightly only: the Drift Lint heartbeat is an independent daily cron,
+      # so a disabled schedule or a silently dropped fire would otherwise
+      # leave no red run of its own. This step makes that silence fail the
+      # nightly; push and pull-request runs skip it.
+      - name: Check the Drift Lint heartbeat
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-drift-heartbeat.cjs
 
   typecheck:
     name: TypeScript Check
