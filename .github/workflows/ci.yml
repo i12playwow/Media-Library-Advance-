@@ -63,10 +63,48 @@ jobs:
       # leave no red run of its own. This step makes that silence fail the
       # nightly; push and pull-request runs skip it.
       - name: Check the Drift Lint heartbeat
+        id: heartbeat
         if: github.event_name == 'schedule'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-drift-heartbeat.cjs
+
+      # The nightly is the run nobody watches, so a red unit job there is as
+      # silent as the heartbeat it checks. This pages through the same secret
+      # as the e2e job and names the heartbeat step when that is the gate that
+      # failed — a quiet schedule needs a different responder than a broken
+      # suite. Scheduled runs only: PR iteration stays quiet.
+      - name: Notify the nightly on failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          WEBHOOK_URL: ${{ secrets.CI_ALERT_WEBHOOK }}
+          HEARTBEAT_OUTCOME: ${{ steps.heartbeat.outcome }}
+          GH_REPO_NAME: ${{ github.repository }}
+          GH_EVENT_NAME: ${{ github.event_name }}
+          GH_COMMIT_SHA: ${{ github.sha }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "CI_ALERT_WEBHOOK not configured; skipping notification"
+            exit 0
+          fi
+          if [ "$HEARTBEAT_OUTCOME" = "failure" ]; then
+            what="the Drift Lint heartbeat check"
+          else
+            what="the unit suite"
+          fi
+          message="🚨 $GH_REPO_NAME — $what failed on the nightly run for $GH_COMMIT_SHA ($GH_EVENT_NAME) — $GH_SERVER_URL/$GH_REPO_NAME/actions/runs/$GH_RUN_ID"
+          payload=$(printf '{"text": "%s", "content": "%s"}' "$message" "$message")
+          for attempt in 1 2; do
+            if curl -fsS --max-time 15 -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK_URL"; then
+              exit 0
+            fi
+            echo "webhook attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
+          echo "webhook notification could not be delivered" >&2
+          exit 1
 
   typecheck:
     name: TypeScript Check
@@ -195,7 +233,9 @@ jobs:
             echo "CI_ALERT_WEBHOOK not configured; skipping notification"
             exit 0
           fi
-          message="\ud83d\u534 $GH_REPO_NAME — Electron E2E failed ($GH_EVENT_NAME) on $GH_COMMIT_SHA — $GH_SERVER_URL/$GH_REPO_NAME/actions/runs/$GH_RUN_ID"
+          # A literal \u escape here is not JSON: the webhook rejected the
+          # payload as a bad Unicode escape. Keep the prefix a real character.
+          message="🚨 $GH_REPO_NAME — Electron E2E failed ($GH_EVENT_NAME) on $GH_COMMIT_SHA — $GH_SERVER_URL/$GH_REPO_NAME/actions/runs/$GH_RUN_ID"
           payload=$(printf '{"text": "%s", "content": "%s"}' "$message" "$message")
           for attempt in 1 2; do
             if curl -fsS --max-time 15 -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK_URL"; then
