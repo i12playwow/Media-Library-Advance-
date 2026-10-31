@@ -332,7 +332,7 @@ function resolvePlaywrightConfig(env: NodeJS.ProcessEnv): ResolvedConfig {
   }
 }
 
-type Step = { name?: string; run?: string; uses?: string; if?: string; env?: Record<string, string> };
+type Step = { name?: string; run?: string; uses?: string; if?: string; id?: string; env?: Record<string, string> };
 type Job = { name?: string; runsOn?: string; steps: Step[] };
 
 function assignStepKey(step: Step, pair: string): void {
@@ -343,6 +343,7 @@ function assignStepKey(step: Step, pair: string): void {
   else if (m[1] === "run") step.run = m[2];
   else if (m[1] === "uses") step.uses = m[2];
   else if (m[1] === "if") step.if = m[2];
+  else if (m[1] === "id") step.id = m[2];
 }
 
 // A deliberately minimal reader for the workflow subset this repo uses
@@ -1257,6 +1258,8 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
       ["Rebuild better-sqlite3 for Node", "npm run rebuild:node"],
       ["Run tests", "npm test"],
       ["Check the Drift Lint heartbeat", "node scripts/check-drift-heartbeat.cjs"],
+      // The notifier's script has its own assertion below.
+      ["Notify the nightly on failure", expect.stringContaining("CI_ALERT_WEBHOOK")],
     ]);
     const rebuildSteps = jobs.test.steps.filter((s) => /rebuild/.test(s.run ?? ""));
     expect(rebuildSteps, "exactly the one explicit Node rebuild").toHaveLength(1);
@@ -1440,6 +1443,35 @@ describe("layer 1 — the doc-drift lint (drift classes 2, 3, 4, 5, 6, 7, 8, 9, 
     expect(notify!.run).toContain('[ -z "$WEBHOOK_URL" ]');
     expect(notify!.run).toContain('exit 0');
     expect(notify!.run).toContain("could not be delivered");
+    // A literal \u escape is not JSON: the webhook rejects the payload.
+    expect(notify!.run, "the payload stays valid JSON").not.toMatch(/\\u[dD]/);
+  });
+
+  it("a red nightly unit job pages too, naming the heartbeat when that is what failed", () => {
+    const notify = jobs.test.steps.find((s) => s.name === "Notify the nightly on failure");
+    expect(notify, "the unit job has a nightly notifier").toBeDefined();
+
+    // Scheduled runs only: a red PR is already visible to whoever pushed it,
+    // and the gate the message names runs on the schedule alone.
+    expect(notify!.if, "failure on the nightly only").toBe(
+      "failure() && github.event_name == 'schedule'"
+    );
+    expect(notify!.env!.WEBHOOK_URL, "the same secret the e2e job pages through").toBe(
+      "${{ secrets.CI_ALERT_WEBHOOK }}"
+    );
+
+    // The two nightly failures need different responders: a quiet heartbeat
+    // is a scheduler investigation, a red suite is a code one.
+    expect(notify!.env!.HEARTBEAT_OUTCOME, "the heartbeat step's outcome is read").toBe(
+      "${{ steps.heartbeat.outcome }}"
+    );
+    expect(
+      jobs.test.steps.find((s) => s.id === "heartbeat")?.name,
+      "the outcome comes from the heartbeat check"
+    ).toBe("Check the Drift Lint heartbeat");
+    expect(notify!.run).toContain("the Drift Lint heartbeat check");
+    expect(notify!.run).toContain("could not be delivered");
+    expect(notify!.run, "the payload stays valid JSON").not.toMatch(/\\u[dD]/);
   });
 
   it("ABI-sensitive PRs can call the shared e2e job via the run-e2e label", () => {

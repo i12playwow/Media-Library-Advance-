@@ -355,6 +355,16 @@ Push, pull-request, and `workflow_call` runs skip the step, so an ordinary
 change never fails on the heartbeat's state; the job grants `actions: read`
 for the API call.
 
+Because the nightly is the run nobody watches, the unit job pages too:
+on scheduled runs only, **Notify the nightly on failure** posts the same
+Slack- and Discord-compatible message (repo, event, commit, run link)
+through the same CI_ALERT_WEBHOOK secret, naming the Drift Lint heartbeat
+check when that is the gate that failed — a quiet schedule needs a
+different responder than a broken suite — and retrying once before it
+fails. With the secret unset it skips quietly, like the e2e job’s, and
+push and pull-request runs never page at all: a red PR is already
+visible to whoever pushed it.
+
 In the e2e job, **Install Electron system dependencies** runs
 `npx playwright install-deps chromium` — Electron needs Chromium's system
 libraries on Linux, and the gate needs them installed to prove the binding
