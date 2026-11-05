@@ -218,15 +218,15 @@ function emptyPosterBackfillSummary(requested: number): PosterBackfillSummary {
 }
 
 function resolveSubGenScriptPath(): string {
-  return path.join(app.getAppPath(), "resources", "subgen", "generate_subtitles.py");
+  return require("../services/subgenRuntime.cjs").scriptPath(app);
 }
 
 function resolveSubGenModelsRoot(): string {
-  return path.join(app.getPath("userData"), "subgen-models");
+  return require("../services/subgenRuntime.cjs").modelsRoot(app);
 }
 
 function resolveSubGenRequirementsPath(): string {
-  return path.join(app.getAppPath(), "resources", "subgen", "requirements.txt");
+  return require("../services/subgenRuntime.cjs").requirementsPath(app);
 }
 
 // ── Sub-Gen Python resolution and self-setup ───────────────────────────────
@@ -266,6 +266,8 @@ function probePythonCommand(command: string[]): Promise<boolean> {
 }
 
 function resolveSubGenPython(): Promise<string[] | null> {
+  const managedPython = require("../services/subgenRuntime.cjs").pythonPath(app);
+  if (fs.existsSync(managedPython)) return Promise.resolve([managedPython]);
   if (subGenPythonCommand) {
     return Promise.resolve(subGenPythonCommand);
   }
@@ -293,7 +295,7 @@ async function spawnSubGenPython(scriptArgs: string[], pythonOverride?: string[]
   }
   try {
     const child = spawn(python[0], [...python.slice(1), ...scriptArgs], {
-      cwd: app.getAppPath(),
+      cwd: app.getPath("userData"),
       windowsHide: true
     });
     return { child };
@@ -1072,6 +1074,9 @@ function registerHandlers(): void {
   });
 
   // Always returns all movies from both modes — used for actress directory
+  ipcMain.handle("movies:selectModeIds", (_event, mode: LibraryMode) => {
+    return require("../services/modeSelection.cjs").selectModeIds(database, mode, gentleUnlocked);
+  });
   ipcMain.handle("movies:listAll", async () => {
     return database.listMovies({ includeGentle: true, query: "", limit: 99999, offset: 0 });
   });
@@ -1147,6 +1152,23 @@ function registerHandlers(): void {
     }
   });
 
+  ipcMain.handle("movies:scanWholeSystem", async (_event, options: ScanAutomationOptions) => {
+    if (activeScanToken) throw new Error("A scan is already running.");
+    const mode = resolveTargetMode(options);
+    if (mode === "gentle" && !gentleUnlocked) throw new Error("Unlock Gentle mode before scanning into it.");
+    const scanner = require("../services/wholeSystemScan.cjs");
+    activeScanToken = createCancelToken();
+    emitScanProgress({ stage: "preparing", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: "Whole-system scan: finding connected drives..." });
+    try {
+      const roots = await scanner.connectedDrives({ cancelToken: activeScanToken });
+      const summary = await scanner.scanWholeSystem(database, { roots, validateComplete: options?.importOnlyCompleteVideos !== false, autoConvertToMp4: Boolean(options?.autoConvertToMp4), autoResolveDuplicates: Boolean(options?.autoResolveDuplicates), mode, cancelToken: activeScanToken, onProgress: emitScanProgress, excludedPaths: [app.getPath("userData")] });
+      if (!summary.cancelled) database.appendScanHistory(summary);
+      return summary;
+    } catch (error) {
+      emitScanProgress({ stage: "cancelled", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: error instanceof Error ? error.message : "Whole-system scan stopped." });
+      throw error;
+    } finally { activeScanToken = null; }
+  });
   ipcMain.handle("movies:scan", async (_event, options?: ScanAutomationOptions) => {
     activeScanToken = createCancelToken();
     try {

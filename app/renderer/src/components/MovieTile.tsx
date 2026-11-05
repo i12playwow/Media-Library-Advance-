@@ -70,12 +70,12 @@ function MovieTileComponent({
       <button className="tile-body" onClick={onClick} type="button">
         <PosterVisual movie={movie} />
         {movie.subtitles.length > 0 && (
-          <span className="subtitle-watermark" title={`${movie.subtitles.length} subtitle file${movie.subtitles.length === 1 ? "" : "s"} detected`}>
-            SRT
+          <span className="subtitle-watermark" role="img" aria-label="Subtitles available" title={`${movie.subtitles.length} subtitle file${movie.subtitles.length === 1 ? "" : "s"} detected`}>
+            CC
           </span>
         )}
         <div className="poster-content">
-          <span className="mode-pill">{movie.libraryMode}</span>
+          <span className="mode-pill" data-library-mode={movie.libraryMode}><span className={`mode-icon mode-icon-${movie.libraryMode}`} aria-hidden="true" />{movie.libraryMode === "gentle" ? "Gentle" : "Normal"}</span>
           <strong>{movie.title}</strong>
           <small>
             {movie.year ?? "Unknown year"}{sep}{movie.resolution}

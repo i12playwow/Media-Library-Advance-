@@ -167,3 +167,5 @@ internals).
 - Metadata and poster fetching rely on online services and can fail if those services are unavailable
 - TMDB usage is intended for free non-commercial projects with attribution
 - Some UI items described in the product vision may still be partial or roadmap-only
+
+The maintained desktop runtime and live regression checks are documented in [docs/installed-runtime.md](docs/installed-runtime.md).

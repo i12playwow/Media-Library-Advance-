@@ -1,6 +1,7 @@
 import type React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LibraryMode, MovieRecord } from "../../../shared/contracts";
+import { distinctPosterMovies } from "../distinctPosterMovies";
 import { MovieTile } from "./MovieTile";
 
 type SortMode =
@@ -31,6 +32,8 @@ interface LibraryPageProps {
   toggleSelected: (movieId: string) => void;
   setContextMenu: (menu: { movie: MovieRecord; x: number; y: number } | null) => void;
   openScanOptions: (mode: LibraryMode) => void;
+  selectAllMode: (mode: LibraryMode) => Promise<void>;
+  gentleUnlocked: boolean;
   selectMissingPosterTitles: () => void;
   handleRefreshSelectedPosters: (movieIds?: string[]) => Promise<void>;
   handleBatchMove: (mode: LibraryMode) => Promise<void>;
@@ -56,6 +59,8 @@ export function LibraryPage({
   toggleSelected,
   setContextMenu,
   openScanOptions,
+  selectAllMode,
+  gentleUnlocked,
   selectMissingPosterTitles,
   handleRefreshSelectedPosters,
   handleBatchMove,
@@ -63,11 +68,25 @@ export function LibraryPage({
   PAGE_SIZE,
   onPlayMovie,
 }: LibraryPageProps) {
+  const [groupCopies, setGroupCopies] = useState(true);
+  const posterMovies = distinctPosterMovies(sortedMovies, groupCopies);
   const hasMoreMovies = movies.length < movieTotalCount;
   const loadMoreRef = useRef(loadMoreMovies);
   loadMoreRef.current = loadMoreMovies;
   const loadingMoreRef = useRef(false);
   const loadMoreBarRef = useRef<HTMLDivElement | null>(null);
+
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  async function loadNextPage() {
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setLoadError(false);
+    try { await loadMoreRef.current(); }
+    catch { setLoadError(true); }
+    finally { loadingMoreRef.current = false; setLoadingMore(false); }
+  }
 
   // Infinite scroll: when the load-more bar approaches the viewport, fetch the
   // next page automatically. The manual button stays as a fallback. The guard
@@ -75,7 +94,7 @@ export function LibraryPage({
   // overlapping calls would append the same page twice.
   useEffect(() => {
     const bar = loadMoreBarRef.current;
-    if (!hasMoreMovies || !bar || typeof IntersectionObserver === "undefined") return;
+    if (!hasMoreMovies || loadError || !bar || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting) || loadingMoreRef.current) return;
@@ -88,7 +107,7 @@ export function LibraryPage({
     );
     observer.observe(bar);
     return () => observer.disconnect();
-  }, [hasMoreMovies, movies.length]);
+  }, [hasMoreMovies, movies.length, groupCopies, loadError]);
 
   return (
     <section className="page library-page">
@@ -104,6 +123,7 @@ export function LibraryPage({
             </h3>
           </div>
           <div className="inline-actions">
+            <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
             <div className="columns-control">
               <span>Sort</span>
               <select
@@ -149,7 +169,7 @@ export function LibraryPage({
               onClick={() => openScanOptions("normal")}
               type="button"
             >
-              Scan normal media folder
+              <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Scan normal media folder
             </button>
             <button
               className="secondary-button"
@@ -157,7 +177,13 @@ export function LibraryPage({
               onClick={() => openScanOptions("gentle")}
               type="button"
             >
-              Scan gentle media folder
+              <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Scan gentle media folder
+            </button>
+            <button className="ghost-button" disabled={isScanning} type="button" onClick={() => void selectAllMode("normal")}>
+              <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Select all Normal
+            </button>
+            <button className="ghost-button" disabled={isScanning || !gentleUnlocked} title={gentleUnlocked ? "Select every Gentle video, including unloaded pages" : "Unlock Gentle mode to select its videos"} type="button" onClick={() => void selectAllMode("gentle")}>
+              <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Select all Gentle
             </button>
             <button
               className="ghost-button"
@@ -198,7 +224,7 @@ export function LibraryPage({
           ref={gridRef}
           style={{ "--cols": gridColumns, marginTop: "1rem" } as React.CSSProperties}
         >
-          {sortedMovies.map((movie) => (
+          {posterMovies.map((movie) => (
             <MovieTile
               key={movie.id}
               movie={movie}
@@ -220,10 +246,11 @@ export function LibraryPage({
             <span className="load-more-count">{movies.length} of {movieTotalCount} movies</span>
             <button
               className="ghost-button"
-              onClick={() => void loadMoreMovies()}
+              disabled={loadingMore}
+              onClick={() => void loadNextPage()}
               type="button"
             >
-              Load {Math.min(PAGE_SIZE, movieTotalCount - movies.length)} more
+              {loadingMore ? "Loading more…" : loadError ? "Retry loading" : `Load ${Math.min(PAGE_SIZE, movieTotalCount - movies.length)} more`}
             </button>
           </div>
         )}

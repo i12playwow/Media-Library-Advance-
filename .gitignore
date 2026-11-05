@@ -115,3 +115,16 @@ __azurite_db*__.json
 # Private local notes — support drafts and one-off files that must never
 # reach the public repo
 github-billing-support-ticket.md
+
+# Local installer packages, test profiles, databases, and generated media
+/diagnostics/
+
+# Maintained snapshot of the installed desktop app (see docs/installed-runtime.md)
+!/installed-update/dist/
+!/installed-update/dist/**
+/installed-update/node_modules/
+# Retain the active renderer bundle; older unreferenced build hashes stay local.
+/installed-update/dist/renderer/assets/*
+!/installed-update/dist/renderer/assets/index-DiZDWUS4.js
+!/installed-update/dist/renderer/assets/index-BUylXRBx.css
+!/installed-update/dist/renderer/assets/icon-CoUbp6ER.png

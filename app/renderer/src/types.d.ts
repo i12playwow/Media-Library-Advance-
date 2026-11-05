@@ -45,6 +45,8 @@ declare global {
       listMovies: (query?: string, limit?: number, offset?: number) => Promise<MovieRecord[]>;
       countMovies: (query?: string) => Promise<number>;
       countMoviesByMode: (query?: string) => Promise<MovieModeCounts>;
+      scanWholeSystem: (options: ScanAutomationOptions) => Promise<ScanSummary>;
+      selectMovieModeIds: (mode: LibraryMode) => Promise<string[]>;
       listAllMovies: () => Promise<MovieRecord[]>;
       ensureMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
       refreshMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;

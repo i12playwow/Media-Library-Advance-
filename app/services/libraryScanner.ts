@@ -1,3 +1,4 @@
+const { isJavMoviePath }: { isJavMoviePath: (file: string) => boolean } = require("./javScanFilter.cjs");
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseClient } from "../database/database";
@@ -134,6 +135,7 @@ export async function scanLibraries(
   const subtitleSearchLogs: string[] = [];
   const invalidFiles: ScanRejectedFile[] = [];
   const candidates: ScanCandidate[] = [];
+  const discoveredPaths = new Set<string>();
 
   onProgress?.({
     stage: "preparing",
@@ -144,7 +146,7 @@ export async function scanLibraries(
     totalFiles: 0,
     imported: 0,
     skipped: 0,
-    message: "Preparing sequential scan..."
+    message: "Preparing media scan..."
   });
 
   for (const libraryMode of ["normal", "gentle"] as const) {
@@ -165,17 +167,25 @@ export async function scanLibraries(
         const videoFiles = await walkForVideos(root, scanOptions.scanAllSubfolders, (warning) => {
           errors.push(`${libraryMode}:${warning}`);
         });
-        for (const videoFile of videoFiles) {
-          const parsed = parseMetadata(
-            path.basename(videoFile, path.extname(videoFile))
-          );
-          candidates.push({
+        // Overlap independent disk reads with a bounded batch, and avoid
+        // checking the same video again when saved roots overlap.
+        for (let offset = 0; offset < videoFiles.length; offset += 16) {
+          if (cancelToken?.cancelled) break;
+          const batch = videoFiles.slice(offset, offset + 16).filter((videoFile) => {
+            if (!isJavMoviePath(videoFile)) { skipped++; return false; }
+            const resolved = path.resolve(videoFile);
+            const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+            if (discoveredPaths.has(key)) return false;
+            discoveredPaths.add(key);
+            return true;
+          });
+          candidates.push(...await Promise.all(batch.map(async (videoFile) => ({
             mode: libraryMode,
             root,
             videoFile,
-            parsed,
+            parsed: parseMetadata(path.basename(videoFile, path.extname(videoFile))),
             fileSize: await getFileSize(videoFile)
-          });
+          }))));
         }
       } catch (error) {
         skipped += 1;
@@ -183,19 +193,6 @@ export async function scanLibraries(
       }
     }
   }
-
-  // Deduplicate candidates by resolved file path (handles overlapping scan roots)
-  const seenPaths = new Set<string>();
-  const uniqueCandidates: ScanCandidate[] = [];
-  for (const c of candidates) {
-    const normalized = path.resolve(c.videoFile).toLowerCase();
-    if (!seenPaths.has(normalized)) {
-      seenPaths.add(normalized);
-      uniqueCandidates.push(c);
-    }
-  }
-  candidates.length = 0;
-  candidates.push(...uniqueCandidates);
 
   const totalFiles = candidates.length;
   if (totalFiles === 0) {
@@ -397,7 +394,7 @@ export async function scanLibraries(
         // Save poster image file into the movie folder
         try {
           const posterMovie = database.getMovie(movieId);
-          if (posterMovie?.posterUrl?.startsWith("http")) {
+          if (scanOptions.moveRename && posterMovie?.posterUrl?.startsWith("http")) {
             await savePosterToFolder(processed.folderPath, posterMovie.posterUrl);
           }
         } catch {
@@ -581,7 +578,6 @@ async function applyProcessingOptions(params: {
   const needsOrganizedPlacement = params.scanOptions.moveRename;
 
   if (
-    needsOrganizedPlacement &&
     params.scanOptions.autoConvertToMp4 &&
     path.extname(currentVideoPath).toLowerCase() !== ".mp4"
   ) {
@@ -613,11 +609,10 @@ async function applyProcessingOptions(params: {
 
     try {
       await convertVideoToMp4(currentVideoPath, targetMp4Path);
-      await fs.unlink(currentVideoPath).catch(() => undefined);
       currentVideoPath = targetMp4Path;
       currentFolderPath = path.dirname(currentVideoPath);
     } catch (error) {
-      warnings.push(`MP4 conversion failed: ${formatError(error)}`);
+      throw new Error(`MP4 conversion failed; video was not imported: ${formatError(error)}`);
     }
   }
 
@@ -765,18 +760,7 @@ async function applyProcessingOptions(params: {
 }
 
 async function convertVideoToMp4(sourcePath: string, targetPath: string): Promise<void> {
-  await runFfmpeg([
-    "-y",
-    "-i",
-    sourcePath,
-    "-c:v",
-    "libx264",
-    "-c:a",
-    "aac",
-    "-movflags",
-    "+faststart",
-    targetPath
-  ]);
+ await require("./videoImport.cjs").convertVideoToMp4(sourcePath, targetPath);
 }
 
 async function downloadBestSubtitleFromSubtitleCat(params: {
@@ -1033,35 +1017,8 @@ function normalizeForKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-async function validateCandidateBeforeImport(
-  filePath: string
-): Promise<ValidationResult> {
-  const stableCheck = await ensureFileIsStable(filePath);
-  if (!stableCheck.ok) {
-    return stableCheck;
-  }
-
-  const probeResult = await probeVideoFile(filePath);
-  if (!probeResult.valid) {
-    return {
-      ok: false,
-      status: probeResult.status ?? "invalid",
-      reason: probeResult.reason ?? "The media probe rejected this file."
-    };
-  }
-
-  if (
-    typeof probeResult.durationSeconds === "number" &&
-    probeResult.durationSeconds < 20 * 60
-  ) {
-    return {
-      ok: false,
-      status: "incomplete",
-      reason: "File is shorter than 20 minutes and does not meet the completed-file import rule."
-    };
-  }
-
-  return { ok: true };
+async function validateCandidateBeforeImport(filePath: string): Promise<{ ok: true } | { ok: false; reason: string; status: "incomplete" | "invalid" | "corrupt" }> {
+ return require("./videoImport.cjs").validateCompleteVideo(filePath);
 }
 
 async function ensureFileIsStable(filePath: string): Promise<ValidationResult> {

@@ -7,6 +7,7 @@
 // auto-download and the player's manual subtitle search both depend on.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearSubtitleCatCache,
   fetchSubtitleCatResults,
   languageLabelFromCode,
   parseSubtitleCatDetailLanguages,
@@ -58,6 +59,7 @@ function htmlResponse(html: string): Response {
 }
 
 afterEach(() => {
+  clearSubtitleCatCache();
   vi.unstubAllGlobals();
 });
 
@@ -190,4 +192,28 @@ describe("languageLabelFromCode", () => {
     expect(languageLabelFromCode("ja")).toBe("Japanese");
     expect(languageLabelFromCode("xx")).toBe("XX");
   });
+});
+
+it("overlaps detail requests and reuses repeat and concurrent searches", async () => {
+  const html = '<table>' + Array.from({length: 5}, (_, i) => `<tr><td><a href="subs/99/speed-001-${i}.html">speed-001-${i}</a></td><td>${5-i} downloads</td></tr>`).join('') + '</table>';
+  let active = 0;
+  let maximum = 0;
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes('index.php')) return htmlResponse(html);
+    active++;
+    maximum = Math.max(maximum, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    const id = url.match(/speed-001-(\d)/)?.[1];
+    return htmlResponse(`<a id="download_en" href="/subs/99/speed-001-${id}-en.srt">Download</a>`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const [first, concurrent] = await Promise.all([fetchSubtitleCatResults('speed-001'), fetchSubtitleCatResults('speed-001')]);
+  expect(maximum).toBe(5);
+  expect(fetchMock).toHaveBeenCalledTimes(6);
+  expect(first).toEqual(concurrent);
+  expect(first).toHaveLength(5);
+  expect(await fetchSubtitleCatResults('SPEED-001')).toEqual(first);
+  expect(fetchMock).toHaveBeenCalledTimes(6);
 });

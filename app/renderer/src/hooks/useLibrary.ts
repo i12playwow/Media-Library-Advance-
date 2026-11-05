@@ -1,3 +1,4 @@
+import { distinctPosterMovies } from "../distinctPosterMovies";
 import {
   startTransition,
   useDeferredValue,
@@ -234,7 +235,7 @@ export function useLibrary({
     ]);
 
     startTransition(() => {
-      setMovies((prev) => (append ? [...prev, ...nextMovies] : nextMovies));
+      setMovies((prev) => distinctPosterMovies(append ? [...prev, ...nextMovies] : nextMovies, false));
       if (!append) {
         if (modeCounts) {
           setMovieTotalCount(modeCounts.total);

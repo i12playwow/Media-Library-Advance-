@@ -98,6 +98,8 @@ const api = {
     ipcRenderer.invoke("actress:setPrimaryPhoto", name, photoUrl),
   actressSetRegion: (name: string, region: string): Promise<Record<string, string>> =>
     ipcRenderer.invoke("actress:setRegion", name, region),
+  scanWholeSystem: (options: ScanAutomationOptions): Promise<ScanSummary> => ipcRenderer.invoke("movies:scanWholeSystem", options),
+  selectMovieModeIds: (mode: LibraryMode): Promise<string[]> => ipcRenderer.invoke("movies:selectModeIds", mode),
   listAllMovies: (): Promise<MovieRecord[]> =>
     ipcRenderer.invoke("movies:listAll"),
   playerFetchSubtitles: (dvdId: string): Promise<OnlineSubtitleResult[]> =>

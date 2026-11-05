@@ -1,0 +1,6 @@
+/* Opaque overlay surfaces keep library titles behind menus and dialogs. */
+.modal-backdrop{z-index:1100;isolation:isolate}
+.modal-card{background:#141a21}
+.ctx-backdrop{z-index:1200;isolation:isolate}
+.ctx-menu{background:#121822;backdrop-filter:none;-webkit-backdrop-filter:none}
+:root[data-theme="light"] .modal-card,:root[data-theme="light"] .ctx-menu{background:#fff}

@@ -15,6 +15,13 @@ import type { OnlineSubtitleResult } from "../shared/contracts";
 const SUBTITLECAT_BASE = "https://www.subtitlecat.com";
 const MAX_DETAIL_PAGES = 5;
 const MAX_RESULTS = 30;
+const searchCache = new Map<string, { expires: number; results: OnlineSubtitleResult[] }>();
+const searchesInFlight = new Map<string, Promise<OnlineSubtitleResult[]>>();
+
+export function clearSubtitleCatCache(): void {
+  searchCache.clear();
+  searchesInFlight.clear();
+}
 
 const REQUEST_HEADERS = {
   "User-Agent":
@@ -106,7 +113,7 @@ export function languageLabelFromCode(code: string): string {
 
 async function fetchHtml(url: string): Promise<string | null> {
   try {
-    const response = await fetch(url, { headers: REQUEST_HEADERS });
+    const response = await fetch(url, { headers: REQUEST_HEADERS, signal: AbortSignal.timeout(15000) });
     if (!response.ok) return null;
     return await response.text();
   } catch {
@@ -127,6 +134,26 @@ async function fetchHtml(url: string): Promise<string | null> {
 export async function fetchSubtitleCatResults(
   query: string
 ): Promise<OnlineSubtitleResult[]> {
+  const normalized = query.trim();
+  const key = normalized.toUpperCase();
+  const cached = searchCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.results.map(result => ({ ...result }));
+  const existing = searchesInFlight.get(key);
+  if (existing) return (await existing).map(result => ({ ...result }));
+  const pending = fetchUncachedResults(normalized);
+  searchesInFlight.set(key, pending);
+  try {
+    const results = await pending;
+    if (results.length) {
+      searchCache.delete(key);
+      searchCache.set(key, { expires: Date.now() + 5 * 60 * 1000, results });
+      while (searchCache.size > 64) searchCache.delete(searchCache.keys().next().value!);
+    }
+    return results.map(result => ({ ...result }));
+  } finally { searchesInFlight.delete(key); }
+}
+
+async function fetchUncachedResults(query: string): Promise<OnlineSubtitleResult[]> {
   try {
     let results = await searchOnce(query);
     if (results.length === 0 && query !== query.toUpperCase()) {
@@ -165,8 +192,9 @@ async function searchOnce(q: string): Promise<OnlineSubtitleResult[]> {
     .sort((left, right) => right.downloads - left.downloads)
     .slice(0, MAX_DETAIL_PAGES);
 
-  for (const row of rows) {
-    const detailHtml = await fetchHtml(row.detailUrl);
+  const details = await Promise.all(rows.map(row => fetchHtml(row.detailUrl)));
+  for (const [index, row] of rows.entries()) {
+    const detailHtml = details[index];
     if (!detailHtml) continue;
     for (const link of parseSubtitleCatDetailLanguages(detailHtml)) {
       push({

@@ -166,8 +166,8 @@ describe("DatabaseClient integration", () => {
     const { dbPath, cleanup } = await createTempDatabase();
     const client = new DatabaseClient(dbPath);
     const mediaDir = await fs.mkdtemp(path.join(os.tmpdir(), "mla-plus-inplace-"));
-    const videoPath = path.join(mediaDir, "Sample Movie.mp4");
-    const subtitlePath = path.join(mediaDir, "Sample Movie.srt");
+    const videoPath = path.join(mediaDir, "SSIS-123 Movie.mkv");
+    const subtitlePath = path.join(mediaDir, "SSIS-123 Movie.srt");
 
     try {
       await fs.writeFile(videoPath, "not-a-real-video");
@@ -185,11 +185,13 @@ describe("DatabaseClient integration", () => {
 
       const summary = await scanLibraries(
         client,
-        { normal: [mediaDir], gentle: [] },
+        { normal: [mediaDir, mediaDir], gentle: [] },
         {
           mode: "normal",
           scanOptions: {
             moveRename: false,
+            autoConvertToMp4: false,
+            resolveLongPath: true,
             importOnlyCompleteVideos: false,
             autoDownloadSubtitleFromSubtitleCat: false
           }
@@ -203,7 +205,8 @@ describe("DatabaseClient integration", () => {
       // Nothing moved, renamed, or written into the source folder: no .nfo,
       // no template-named copy, no poster sidecar.
       const filesAfter = await fs.readdir(mediaDir);
-      expect([...filesAfter].sort()).toEqual(["Sample Movie.mp4", "Sample Movie.srt"]);
+      expect([...filesAfter].sort()).toEqual(["SSIS-123 Movie.mkv", "SSIS-123 Movie.srt"]);
+      expect(await fs.readFile(videoPath, "utf8")).toBe("not-a-real-video");
 
       const movies = client.listMovies({ includeGentle: true, query: "" });
       expect(movies).toHaveLength(1);

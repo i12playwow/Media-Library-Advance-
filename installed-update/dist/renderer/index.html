@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <!--
+      NOTE: The CSP below is relaxed for Electron compatibility (allows 'unsafe-eval' and 'wasm-unsafe-eval').
+      For production, consider tightening this policy and using Electron's contextIsolation and preload scripts.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob: file: http: https:;
+        font-src 'self' data:;
+        connect-src 'self' http: https: ws: wss:;
+        media-src 'self' data: blob: file: mla-media: http: https:;
+        object-src 'none';
+        base-uri 'self';
+      "
+    />
+    <link rel="icon" type="image/png" href="./assets/icon-CoUbp6ER.png" />
+    <title>MLA+</title>
+    <link rel="stylesheet" href="./device-share/desktop.css"><script src="./device-share/desktop.js" defer></script>
+    <script type="module" crossorigin src="./assets/index-DiZDWUS4.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BUylXRBx.css">
+  <link rel="stylesheet" href="./subtitle-workspace/common.css"><script src="./subtitle-workspace/common.js" defer></script><script src="./subtitle-workspace/desktop.js" defer></script></head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -263,6 +263,7 @@ export function App() {
 
   const {
     handleMoveOne,
+    selectAllMode,
     handleBatchMove,
     selectMissingPosterTitles,
     handlePickLibraryFolder,
@@ -585,6 +586,8 @@ export function App() {
             toggleSelected={toggleSelected}
             setContextMenu={setContextMenu}
             openScanOptions={openScanOptions}
+            selectAllMode={selectAllMode}
+            gentleUnlocked={appState?.gentleUnlocked ?? false}
             selectMissingPosterTitles={selectMissingPosterTitles}
             handleRefreshSelectedPosters={handleRefreshSelectedPosters}
             handleBatchMove={handleBatchMove}

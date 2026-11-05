@@ -4,9 +4,9 @@ interface ScanOptionsDialogProps {
   pendingScanMode: LibraryMode;
   organizationDraft: OrganizationSettings;
   scanOptionsDraft: ScanAutomationOptions;
-  scanSourceMode: "saved" | "folder";
+  scanSourceMode: "saved" | "folder" | "system";
   onChangeScanOption: <K extends keyof ScanAutomationOptions>(key: K, value: ScanAutomationOptions[K]) => void;
-  onChangeScanSource: (mode: "saved" | "folder") => void;
+  onChangeScanSource: (mode: "saved" | "folder" | "system") => void;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -21,7 +21,8 @@ export function ScanOptionsDialog({
   onConfirm,
   onClose,
 }: ScanOptionsDialogProps) {
-  const libraryPath =
+  const systemScan = scanSourceMode === "system";
+  const libraryPath = systemScan ? "Original locations on connected drives" :
     pendingScanMode === "normal"
       ? organizationDraft.normalLibraryPath
       : organizationDraft.gentleLibraryPath;
@@ -34,11 +35,11 @@ export function ScanOptionsDialog({
             <p className="eyebrow">Scan</p>
             <h3>{pendingScanMode === "normal" ? "Normal mode" : "Gentle mode"} setup</h3>
             <p className="subtle">
-              Choose a source, review the destination, then confirm the scan options before import starts.
+              JAV-only scan: files without a recognizable movie code in the filename or immediate folder are skipped. Original files are kept.
             </p>
           </div>
           <div className="scan-modal-badges">
-            <span>{scanSourceMode === "saved" ? "Saved folders" : "New folder"}</span>
+            <span>{systemScan ? "Whole system" : scanSourceMode === "saved" ? "Saved folders" : "New folder"}</span>
             <span>{pendingScanMode === "normal" ? "Normal" : "Gentle"}</span>
           </div>
         </div>
@@ -47,6 +48,22 @@ export function ScanOptionsDialog({
         <div className="scan-section">
           <p className="scan-section-label">🧭 Scan source</p>
           <div className="options-grid">
+            <label className="toggle-field">
+              <input checked={scanSourceMode === "system"} type="radio" name="scan-source" onChange={() => {
+                onChangeScanSource("system");
+                onChangeScanOption("moveRename", false);
+                onChangeScanOption("copyToLibrary", false);
+                onChangeScanOption("autoResolveDuplicates", false);
+                onChangeScanOption("autoConvertToMp4", false);
+                onChangeScanOption("autoDownloadSubtitleFromSubtitleCat", false);
+                onChangeScanOption("importOnlyCompleteVideos", true);
+                onChangeScanOption("importBetterQuality", false);
+                onChangeScanOption("resolveLongPath", false);
+                onChangeScanOption("scanAllSubfolders", true);
+                onChangeScanOption("autoMatchSubtitle", true);
+              }} />
+              <span>Whole system — connected drives, no moving</span>
+            </label>
             <label className="toggle-field">
               <input
                 checked={scanSourceMode === "saved"}
@@ -72,14 +89,16 @@ export function ScanOptionsDialog({
         <div className="scan-section">
           <p className="scan-section-label">Library folder destination</p>
           <div className="scan-library-path">
-            {libraryPath || (
+            {!scanOptionsDraft.moveRename ? (
+              <span>Original video locations — no destination folder needed</span>
+            ) : libraryPath || (
               <span className="muted-inline">
                 Not set. Imported files stay under the scanned root unless organization options move them.
                 <br />
                 <small>Set a library path in Settings {">"} Library storage</small>
               </span>
             )}
-            {libraryPath && (
+            {scanOptionsDraft.moveRename && libraryPath && (
               <span className="path-chip">{libraryPath}</span>
             )}
           </div>
@@ -89,9 +108,9 @@ export function ScanOptionsDialog({
         <div className="scan-section">
           <p className="scan-section-label">File handling</p>
           <p className="subtle" style={{ margin: "0.25rem 0 0" }}>
-            {scanSourceMode === "saved"
-              ? "Saved folders are rescanned using the current import options. Files may still be reorganized when move, rename, long-path, or conversion options apply."
-              : "Choosing a new folder starts an import from that folder. Files may still be reorganized when move, rename, long-path, or conversion options apply."}
+            {scanOptionsDraft.moveRename
+              ? "Videos and matched subtitles will be moved into your library folder structure."
+              : "Videos and local subtitles stay at their original paths. Optional MP4 conversion creates a new file and keeps the original. No renaming or poster sidecars. Duplicate cleanup runs only if you select it below. Optional subtitle downloads add a new file beside the video."}
           </p>
         </div>
 
@@ -101,13 +120,25 @@ export function ScanOptionsDialog({
           <div className="scan-options-grid">
             <label className="toggle-field">
               <input
-                checked={scanOptionsDraft.moveRename}
-                onChange={(e) => onChangeScanOption("moveRename", e.target.checked)}
-                type="checkbox"
+                disabled={systemScan}
+                checked={!scanOptionsDraft.moveRename}
+                onChange={() => onChangeScanOption("moveRename", false)}
+                type="radio"
+                name="import-placement"
               />
               <span>
-                Move and rename files into library folders (uncheck to import in place — no files are moved)
+                Import in place — keep files in their original folders
               </span>
+            </label>
+            <label className="toggle-field">
+              <input
+                disabled={systemScan}
+                checked={scanOptionsDraft.moveRename}
+                onChange={() => onChangeScanOption("moveRename", true)}
+                type="radio"
+                name="import-placement"
+              />
+              <span>Move and rename files into library folders</span>
             </label>
             <label className="toggle-field">
               <input
@@ -115,10 +146,11 @@ export function ScanOptionsDialog({
                 onChange={(e) => onChangeScanOption("importOnlyCompleteVideos", e.target.checked)}
                 type="checkbox"
               />
-              <span>Import only complete videos (20 min+)</span>
+              <span>Skip unfinished or damaged videos (checks file stability and video data)</span>
             </label>
             <label className="toggle-field">
               <input
+                disabled={systemScan}
                 checked={scanOptionsDraft.importBetterQuality}
                 onChange={(e) => onChangeScanOption("importBetterQuality", e.target.checked)}
                 type="checkbox"
@@ -131,10 +163,11 @@ export function ScanOptionsDialog({
                 onChange={(e) => onChangeScanOption("autoResolveDuplicates", e.target.checked)}
                 type="checkbox"
               />
-              <span>Auto-resolve duplicates and keep the best file</span>
+              <span>{systemScan ? "Auto-resolve duplicate videos — keep highest resolution in library; keep all files on disk" : "Auto-resolve duplicates and keep the best file (deletes lower-quality duplicates)"}</span>
             </label>
             <label className="toggle-field">
               <input
+                disabled={systemScan}
                 checked={scanOptionsDraft.scanAllSubfolders}
                 onChange={(e) => onChangeScanOption("scanAllSubfolders", e.target.checked)}
                 type="checkbox"
@@ -143,11 +176,12 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
+                disabled={systemScan}
                 checked={scanOptionsDraft.resolveLongPath}
                 onChange={(e) => onChangeScanOption("resolveLongPath", e.target.checked)}
                 type="checkbox"
               />
-              <span>Resolve long file paths</span>
+              <span>Resolve long file paths (applies when moving or renaming)</span>
             </label>
             <label className="toggle-field">
               <input
@@ -155,10 +189,11 @@ export function ScanOptionsDialog({
                 onChange={(e) => onChangeScanOption("autoConvertToMp4", e.target.checked)}
                 type="checkbox"
               />
-              <span>Auto-convert to MP4</span>
+              <span>Convert to MP4 — keep original file</span>
             </label>
             <label className="toggle-field">
               <input
+                disabled={systemScan}
                 checked={scanOptionsDraft.autoMatchSubtitle}
                 onChange={(e) => onChangeScanOption("autoMatchSubtitle", e.target.checked)}
                 type="checkbox"
@@ -167,6 +202,7 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
+                disabled={systemScan}
                 checked={scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
                 onChange={(e) =>
                   onChangeScanOption("autoDownloadSubtitleFromSubtitleCat", e.target.checked)
@@ -227,7 +263,7 @@ export function ScanOptionsDialog({
 
         <div className="inline-actions scan-modal-actions">
           <button className="primary-button" onClick={onConfirm} type="button">
-            {scanSourceMode === "saved" ? "Rescan saved folders" : "Scan chosen folder"}
+            {scanSourceMode === "system" ? "Scan whole system (no moving)" : scanSourceMode === "saved" ? "Rescan saved folders" : "Scan chosen folder"}
           </button>
           <button className="ghost-button" onClick={onClose} type="button">
             Cancel

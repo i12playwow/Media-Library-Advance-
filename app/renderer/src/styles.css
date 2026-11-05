@@ -1435,6 +1435,8 @@ code {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 1100;
+  isolation: isolate;
   background: rgba(4, 6, 8, 0.72);
   display: grid;
   place-items: center;
@@ -1800,11 +1802,11 @@ code {
   list-style: none;
   margin: 0;
   padding: 0.75rem 0;
-  background: linear-gradient(180deg, rgba(18, 24, 34, 0.98), rgba(12, 16, 24, 0.98));
+  background: #121822;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 18px;
   box-shadow: 0 20px 54px rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(18px);
+  backdrop-filter: none;
   min-width: 240px;
   max-width: 320px;
   overflow: hidden;
@@ -3113,3 +3115,20 @@ kbd {
   background: rgba(46, 204, 113, 0.18);
   border-color: #2ecc71;
 }
+
+/* Opaque overlay surfaces keep library titles behind menus and dialogs. */
+.modal-backdrop{z-index:1100;isolation:isolate}
+.modal-card{background:#141a21}
+.ctx-backdrop{z-index:1200;isolation:isolate}
+.ctx-menu{background:#121822;backdrop-filter:none;-webkit-backdrop-filter:none}
+:root[data-theme="light"] .modal-card,:root[data-theme="light"] .ctx-menu{background:#fff}
+
+.mode-icon{display:inline-block;width:1.1em;height:1.1em;vertical-align:-.16em;margin-right:.4em;background:currentColor;flex-shrink:0;mask-repeat:no-repeat;mask-position:center;mask-size:contain;-webkit-mask-repeat:no-repeat;-webkit-mask-position:center;-webkit-mask-size:contain}.mode-icon-normal{color:#70c6ef;mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 2v14h10V5H7ZM4 6v3h1V6H4Zm15 0v3h1V6h-1ZM4 11v3h1v-3H4Zm15 0v3h1v-3h-1ZM4 16v3h1v-3H4Zm15 0v3h1v-3h-1Z'/%3E%3C/svg%3E");-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M3 3h18v18H3V3Zm4 2v14h10V5H7Z'/%3E%3C/svg%3E")}.mode-icon-gentle{color:#9ed5ac;mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M20 2C8 2 3 7 3 13a7 7 0 0 0 1 4L2 21l2 1 2-4a8 8 0 0 0 5 2c7 0 11-8 9-18ZM6 16 17 6 8 18l-2-2Z'/%3E%3C/svg%3E");-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M20 2C8 2 3 7 3 13a7 7 0 0 0 1 4L2 21l2 1 2-4a8 8 0 0 0 5 2c7 0 11-8 9-18ZM6 16 17 6 8 18l-2-2Z'/%3E%3C/svg%3E")}.mode-pill{display:inline-flex;align-items:center}.mode-select-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+
+/* Movie cards already provide their own title and mode badge. */
+.movie-tile .poster-fallback-content{display:none}
+
+/* CC marker for saved subtitles. */
+.subtitle-watermark{border-radius:5px;letter-spacing:.03em;min-width:2.2rem;background:#111b2a;backdrop-filter:none;-webkit-backdrop-filter:none;border:1px solid #8bc9e0;font-size:.75rem}:root[data-theme="light"] .subtitle-watermark{background:#fff;color:#121822}
+
+.scan-toast-info{flex-wrap:wrap}.scan-toast-msg{white-space:normal;overflow-wrap:anywhere}.scan-indeterminate{animation:scan-travel 1.5s ease-in-out infinite}@keyframes scan-travel{from{transform:translateX(-100%)}to{transform:translateX(290%)}}@media(prefers-reduced-motion:reduce){.scan-indeterminate{animation:none}}

@@ -25,24 +25,9 @@ interface ProcessResult {
   stderr: string;
 }
 
-function resolveBinary(
-  candidates: Array<string | null | undefined>,
-  fallbackCommand: string
-): string {
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-
-    const normalizedCandidate = normalizeExecutablePath(candidate);
-    if (fs.existsSync(normalizedCandidate)) {
-      return normalizedCandidate;
-    }
-  }
-
-  return fallbackCommand;
+function resolveBinary(candidates: Array<string | null | undefined>, fallbackCommand: string): string {
+ return require("./mediaBinary.cjs").resolveWorkingBinary(candidates, fallbackCommand);
 }
-
 export function resolveFfmpegPaths(): FfmpegPaths {
   const basePath =
     process.env.NODE_ENV === "development"

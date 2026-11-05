@@ -43,7 +43,7 @@ export function useScanHandlers({
   setShowScanOptionsPrompt,
   setPendingScanMode,
 }: UseScanHandlersProps) {
-  const [scanSourceMode, setScanSourceMode] = useState<"saved" | "folder">("folder");
+  const [scanSourceMode, setScanSourceMode] = useState<"saved" | "folder" | "system">("folder");
 
   async function autoResolveDuplicateGroups(
     groups: DuplicateGroup[],
@@ -135,7 +135,9 @@ export function useScanHandlers({
 
     try {
       const summary =
-        scanSourceMode === "saved"
+        scanSourceMode === "system"
+          ? await desktopApi.scanWholeSystem(scanOptionsDraft)
+          : scanSourceMode === "saved"
           ? await desktopApi.scanLibraries(scanOptionsDraft)
           : await desktopApi.pickScanFolder(scanOptionsDraft);
       setLastScanSummary(summary);

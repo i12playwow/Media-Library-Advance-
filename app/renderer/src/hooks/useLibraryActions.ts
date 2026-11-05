@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
 import type { AppShellState, LibraryMode, MovieRecord } from "../../../shared/contracts";
 
 interface UseLibraryActionsProps {
@@ -24,6 +24,19 @@ export function useLibraryActions({
   setAppState,
   setStatusMessage,
 }: UseLibraryActionsProps) {
+  const selectionRequest = useRef(0);
+  async function selectAllMode(mode: LibraryMode): Promise<void> {
+    if (!desktopApi) return;
+    const request = ++selectionRequest.current;
+    try {
+      const ids = await desktopApi.selectMovieModeIds(mode);
+      if (request !== selectionRequest.current) return;
+      setSelectedIds(ids);
+      setStatusMessage(`${ids.length} ${mode === "gentle" ? "Gentle" : "Normal"} videos selected across the library.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not select this library mode.");
+    }
+  }
   async function handleMoveOne(movieId: string, mode: LibraryMode): Promise<void> {
     if (!desktopApi) {
       setStatusMessage("Desktop bridge unavailable. Restart MLA+ and try again.");
@@ -69,6 +82,7 @@ export function useLibraryActions({
   }
 
   return {
+    selectAllMode,
     handleMoveOne,
     handleBatchMove,
     selectMissingPosterTitles,

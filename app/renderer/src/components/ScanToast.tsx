@@ -17,11 +17,12 @@ export function ScanToast({
   onCancel,
   onDismiss,
 }: ScanToastProps) {
+  const systemScanActive = isScanning && scanProgress.message?.startsWith("Whole-system scan:");
   return (
     <div className={`scan-toast${isScanning ? " active" : " done"}`}>
       <div className="scan-toast-top">
         <span className="scan-toast-label">
-          {isScanning ? "⏳ Scanning…" : "✅ Scan complete"}
+          {isScanning ? "⏳ Scanning…" : scanProgress.stage === "cancelled" ? "⏹ Scan stopped" : "✅ Scan complete"}
         </span>
         <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
           {isScanning && (
@@ -43,14 +44,14 @@ export function ScanToast({
         </div>
       </div>
       <div className="scan-toast-bar-track">
-        <div className="scan-toast-bar-fill" style={{ width: `${progressPercent}%` }} />
+        <div className={`scan-toast-bar-fill${systemScanActive ? " scan-indeterminate" : ""}`} style={{ width: systemScanActive ? "35%" : `${progressPercent}%` }} />
       </div>
       <div className="scan-toast-info">
-        <span className="scan-toast-pct">{progressPercent}%</span>
+        <span className="scan-toast-pct">{systemScanActive ? "Working…" : `${progressPercent}%`}</span>
         <span className="scan-toast-count">
           {scanProgress.imported}/{scanProgress.totalFiles} movies
         </span>
-        <span className="scan-toast-msg">{scanStageLabel}</span>
+        <span className="scan-toast-msg">{scanProgress.message || scanStageLabel}</span>
       </div>
     </div>
   );

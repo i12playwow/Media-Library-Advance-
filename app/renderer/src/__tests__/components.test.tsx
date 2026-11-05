@@ -705,7 +705,7 @@ describe("PlayerPopup resize handles", () => {
 // ScanOptionsDialog — in-place (no-move) scan option
 // ---------------------------------------------------------------------------
 describe("ScanOptionsDialog move/rename toggle", () => {
-  it("defaults to on and switches the scan to import-in-place when unchecked", () => {
+  it("defaults to organized import and allows choosing import in place", () => {
     const onChangeScanOption = vi.fn();
     render(
       <ScanOptionsDialog
@@ -720,12 +720,12 @@ describe("ScanOptionsDialog move/rename toggle", () => {
       />
     );
 
-    const checkbox = screen.getByRole("checkbox", {
+    const organized = screen.getByRole("radio", {
       name: /move and rename files into library folders/i
     }) as HTMLInputElement;
-    expect(checkbox).toBeChecked();
+    expect(organized).toBeChecked();
 
-    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("radio", { name: /import in place/i }));
     expect(onChangeScanOption).toHaveBeenCalledWith("moveRename", false);
   });
 })
