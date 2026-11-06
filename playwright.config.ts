@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  // Node service tests run separately with node --test.
+  testMatch: '**/*.spec.ts',
   timeout: 120000,
   // Shared-runner launches (xvfb, cold caches) occasionally fail on the
   // first attempt; CI gets 2 retries, local runs stay strict at 0.

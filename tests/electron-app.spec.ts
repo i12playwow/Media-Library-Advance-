@@ -37,7 +37,7 @@ test("Electron app smoke flow covers library, gentle toggle, player, and theme p
     // (the library stays mounted behind it), so the title is asserted on the
     // popup header rather than as unique page text.
     await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
-    await page.getByRole("button", { name: "Subtitles" }).click();
+    await page.getByRole("button", { name: "Subtitles", exact: true }).click();
     await expect(page.locator("#player-sub-search-query")).toHaveValue("ZZZ-001");
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();

@@ -37,7 +37,7 @@ test("Subtitle search is auto-filled with the detected DVD ID and stays editable
     // the movie title appears in (and is asserted on) the popup header.
     await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
 
-    await page.getByRole("button", { name: "Subtitles" }).click();
+    await page.getByRole("button", { name: "Subtitles", exact: true }).click();
 
     const searchInput = page.locator("#player-sub-search-query");
     await expect(searchInput).toHaveValue("ZZZ-001");

@@ -7,7 +7,7 @@
         "node": ">=22.12.0 <27"
     },
     "scripts": {
-        "build": "tsc -b && vite build",
+        "build": "tsc -b && vite build && node scripts/copy-runtime-assets.cjs",
         "postinstall": "electron-builder install-app-deps",
         "start": "node scripts/setup-doctor.cjs --check --quiet --skip esbuild && npm run rebuild:electron && electron .",
         "dev": "node scripts/dev.cjs",
