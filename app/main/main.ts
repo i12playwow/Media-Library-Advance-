@@ -1050,7 +1050,12 @@ function registerHandlers(): void {
     }
   );
 
-  ipcMain.handle("movies:list", async (_event, args?: { query?: string; limit?: number; offset?: number }) => {
+      const removeMovieEntries = require("../services/movieRemoval.cjs").createMovieRemover({ database, isGentleUnlocked: () => gentleUnlocked, trash: (file: string) => shell.trashItem(file), confirm: async (request: { title: string; message: string; detail: string; button: string }) => { const result = await dialog.showMessageBox(mainWindow!, { type: "warning", title: request.title, message: request.message, detail: request.detail, buttons: ["Cancel", request.button], defaultId: 0, cancelId: 0, noLink: true }); return result.response === 1; } });
+    ipcMain.handle("movies:remove", async (event, ids: string[], action: "library" | "trash") => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Stop the scan before removing movies."); return removeMovieEntries(ids, action); });
+const linkActressMovies = require("../services/actressMovies.cjs").createActressMovieLinker({ database, isGentleUnlocked: () => gentleUnlocked });
+    ipcMain.handle("actress:linkMovies", async (event, name: string, ids: string[]) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Wait for the scan to finish before linking movies."); return linkActressMovies(name, ids); });
+    ipcMain.handle("movies:summary", (event) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); return require("../services/librarySummary.cjs").librarySummary(database, gentleUnlocked); });
+    ipcMain.handle("movies:list", async (_event, args?: { query?: string; limit?: number; offset?: number }) => {
     return database.listMovies({
       includeGentle: gentleUnlocked,
       query: args?.query ?? "",

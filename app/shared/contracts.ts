@@ -183,6 +183,7 @@ export interface PosterBackfillSummary {
 }
 
 export interface ScanSummary {
+  skippedAlreadyScanned?: number;
   discovered: number;
   imported: number;
   skipped: number;

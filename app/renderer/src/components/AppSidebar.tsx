@@ -1,3 +1,4 @@
+import { useLibraryCounts } from "./LibraryCounts";
 import React, { memo } from "react";
 import styles from './AppSidebar.module.css';
 import type { AppPage, MovieRecord } from "../../../shared/contracts";
@@ -18,6 +19,7 @@ interface AppSidebarProps {
   movies: MovieRecord[];
   /** Full library total for the current filter — computed over the whole DB, not the loaded page. */
   totalMovies: number;
+  gentleUnlocked?: boolean;
   normalCount: number;
   gentleCount: number;
   statusMessage: string;
@@ -33,10 +35,12 @@ export const AppSidebar = memo(function AppSidebar({
   onNavigate,
   movies,
   totalMovies,
+  gentleUnlocked = false,
   normalCount,
   gentleCount,
   statusMessage,
 }: AppSidebarProps) {
+  const libraryTotals=useLibraryCounts(gentleUnlocked,movies.length);
   return (
     <>
       <aside
@@ -85,20 +89,20 @@ export const AppSidebar = memo(function AppSidebar({
             <p className="status-note">{statusMessage}</p>
             <div className="sidebar-showcase">
               <div className="sidebar-showcase-header">
-                <span>Library snapshot</span>
-                <span>{totalMovies} titles</span>
+                <span>Library totals</span>
+                <span>{libraryTotals?.cataloged.toLocaleString() ?? "—"} cataloged</span>
               </div>
               <div className="sidebar-summary-grid">
                 <div className="sidebar-summary-card">
-                  <strong>{totalMovies}</strong>
-                  <span>Visible titles</span>
+                  <strong>{libraryTotals?.cataloged.toLocaleString() ?? "—"}</strong>
+                  <span>Cataloged movies</span>
                 </div>
                 <div className="sidebar-summary-card">
-                  <strong>{normalCount}</strong>
+                  <strong>{libraryTotals?.normal.toLocaleString() ?? "—"}</strong>
                   <span>Normal mode</span>
                 </div>
                 <div className="sidebar-summary-card">
-                  <strong>{gentleCount}</strong>
+                  <strong>{gentleUnlocked ? libraryTotals?.gentle?.toLocaleString() ?? "—" : "Locked"}</strong>
                   <span>Gentle mode</span>
                 </div>
               </div>

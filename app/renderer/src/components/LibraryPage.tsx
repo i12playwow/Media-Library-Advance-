@@ -1,3 +1,4 @@
+import { LibraryCounts } from "./LibraryCounts";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { LibraryMode, MovieRecord } from "../../../shared/contracts";
@@ -37,6 +38,7 @@ interface LibraryPageProps {
   selectMissingPosterTitles: () => void;
   handleRefreshSelectedPosters: (movieIds?: string[]) => Promise<void>;
   handleBatchMove: (mode: LibraryMode) => Promise<void>;
+  onRemoveMovies?: (ids: string[], action: "library" | "trash") => Promise<void>;
   loadMoreMovies: () => Promise<void>;
   PAGE_SIZE: number;
   onPlayMovie: (movie: MovieRecord) => void;
@@ -64,6 +66,7 @@ export function LibraryPage({
   selectMissingPosterTitles,
   handleRefreshSelectedPosters,
   handleBatchMove,
+  onRemoveMovies,
   loadMoreMovies,
   PAGE_SIZE,
   onPlayMovie,
@@ -116,7 +119,7 @@ export function LibraryPage({
           <div>
             <p className="eyebrow">Library management</p>
             <h3>
-              Batch-safe local file control
+              Your library
               {movieTotalCount > 0 && (
                 <span className="movie-count-badge"> — {movieTotalCount.toLocaleString()} movies</span>
               )}
@@ -124,6 +127,7 @@ export function LibraryPage({
           </div>
           <div className="inline-actions">
             <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
+            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Move selected video files to Recycle Bin…</button></>}
             <div className="columns-control">
               <span>Sort</span>
               <select
@@ -218,6 +222,7 @@ export function LibraryPage({
           </div>
         </div>
 
+        <LibraryCounts gentleUnlocked={gentleUnlocked} loaded={movies.length} shown={posterMovies.length} matched={movieTotalCount} grouped={groupCopies} />
         <div
           className="movie-grid"
           onMouseDown={handleGridMouseDown}

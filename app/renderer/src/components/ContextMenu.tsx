@@ -17,6 +17,8 @@ interface ContextMenuProps {
   onMove: () => void;
   onToggleSelect: () => void;
   onCopyPath: () => void;
+  onRemoveLibrary?: () => void;
+  onTrashFile?: () => void;
   onCopyVideoId?: () => void;
 }
 
@@ -31,6 +33,8 @@ export function ContextMenu({
   onMove,
   onToggleSelect,
   onCopyPath,
+  onRemoveLibrary,
+  onTrashFile,
   onCopyVideoId,
 }: ContextMenuProps) {
   const { movie, x, y } = contextMenu;
@@ -99,6 +103,8 @@ export function ContextMenu({
             </button>
           </li>
         )}
+        {onRemoveLibrary && <li><button className="ctx-item" type="button" onClick={onRemoveLibrary}>Remove from library…</button></li>}
+        {onTrashFile && <li><button className="ctx-item" type="button" onClick={onTrashFile}>Move video file to Recycle Bin…</button></li>}
       </ul>
     </div>
   );

@@ -607,7 +607,10 @@ describe("MovieTile", () => {
 // AppSidebar — library snapshot
 // ---------------------------------------------------------------------------
 describe("AppSidebar library snapshot", () => {
-  it("shows the full library totals, not the loaded page's length", () => {
+  it("shows the full library totals, not the loaded page's length", async () => {
+    const previousApi = window.desktopApi;
+    window.desktopApi = { ...previousApi, librarySummary: vi.fn().mockResolvedValue({ cataloged: 480, available: 470, missing: 10, normal: 450, gentle: 30, scope: "all" }) };
+    try {
     render(
       <AppSidebar
         collapsed={false}
@@ -618,19 +621,21 @@ describe("AppSidebar library snapshot", () => {
         activePage="home"
         onNavigate={() => {}}
         movies={[makeMovie(), makeMovie({ id: "second-id" })]}
-        totalMovies={480}
-        normalCount={450}
-        gentleCount={30}
+        gentleUnlocked={true}
+        totalMovies={2}
+        normalCount={2}
+        gentleCount={0}
         statusMessage="Ready"
       />
     );
 
     // The snapshot reports DB totals even though only 2 movies are loaded.
-    expect(screen.getByText("480 titles")).toBeInTheDocument();
+    expect(await screen.findByText("480 cataloged")).toBeInTheDocument();
     expect(screen.getByText("480")).toBeInTheDocument(); // Visible titles
     expect(screen.getByText("450")).toBeInTheDocument(); // Normal mode
     expect(screen.getByText("30")).toBeInTheDocument(); // Gentle mode
-    expect(screen.queryByText("2 titles")).toBeNull();
+    expect(screen.queryByText("2 cataloged")).toBeNull();
+    } finally { window.desktopApi = previousApi; }
   });
 })
 

@@ -35,6 +35,8 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
   if (!['normal', 'gentle'].includes(mode)) throw new Error('Choose Normal or Gentle mode.');
   const scanRoots = [...new Set((roots || await connectedDrives()).map(root => path.resolve(root)))];
   if (!scanRoots.length && !cancelToken.cancelled) throw new Error('No accessible drives were found. Connect a drive and try again.');
+  const importHistory = require("./scanImportHistory.cjs").createScanImportHistory(database, cancelToken);
+  let skippedAlreadyScanned = 0;
   let imported = 0, skipped = 0, discovered = 0, directories = 0, lastProgress = 0;
   const invalidFiles = [], subtitleSearchLogs = [];
   const downloadMissingSubtitle = autoDownloadSubtitleFromSubtitleCat ? require("./scanSubtitleDownload.cjs").createScanSubtitleDownloader(database, { language: preferredSubtitleLanguage, resolveLongPath, cancelToken }) : null;
@@ -47,7 +49,7 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
   function report(stage, root, file, force = false) {
     if (!force && Date.now() - lastProgress < 250) return;
     lastProgress = Date.now();
-    onProgress?.({ stage, mode, currentRoot: root, currentFile: file, processedFiles: imported + skipped, totalFiles: discovered, imported, skipped, message: `Whole-system scan: ${discovered} videos found, ${imported} added; ${directories} folders checked. ${skippedUnrecognized} unrecognized files skipped. Files stay in place.` });
+    onProgress?.({ stage, mode, currentRoot: root, currentFile: file, processedFiles: imported + skipped, totalFiles: discovered, imported, skipped, message: `Whole-system scan: ${discovered} videos found, ${imported} added; ${directories} folders checked. ${skippedUnrecognized} unrecognized files skipped; ${skippedAlreadyScanned} previously scanned skipped. Files stay in place.` });
   }
   function warning(directory, error) { if (errors.length < 100) errors.push(`${directory}: ${error.code || 'Could not read folder'}`); }
   const waiting = new Map();
@@ -88,7 +90,9 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
         if (javOnly && !isJavMoviePath(file)) { skipped++; skippedUnrecognized++; report("processing", root, file); if (discovered % 32 === 0) await new Promise(resolve => setImmediate(resolve)); continue; }
         try {
           const existingId = database.findMovieIdBySourcePath(file);
-          if (existingId) {
+          const priorMovie = existingId ? database.getMovie?.(existingId) : null;
+          if ((priorMovie && priorMovie.libraryMode !== mode) || await importHistory.shouldSkip(file)) {
+            skippedAlreadyScanned++;
             const existing = database.getMovie?.(existingId);
             if (autoResolveDuplicates && existing?.libraryMode === mode) {
               const key = duplicateKey(file), previous = preferred.get(key);
@@ -99,7 +103,7 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
                 duplicatesResolved++;
               }
             }
-            await downloadCaptions(existingId, file);
+            await downloadCaptions(existingId || importHistory.movieIdFor(file), file);
             skipped++; report('processing', root, file);
             if (discovered % 32 === 0) await new Promise(resolve => setImmediate(resolve));
             continue;
@@ -121,11 +125,11 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
           const resolution = stem.match(/\b(2160|1080|720|480)p\b/i)?.[0].toUpperCase() || (/\b4k\b/i.test(stem) ? '2160P' : 'Unknown');
           let videoId = null;
           try { videoId = require('../shared/videoId').extractVideoId(stem); } catch { videoId = stem.match(/[a-z]{2,8}-\d{2,7}/i)?.[0].toUpperCase() || null; }
-          const id = database.createMovieId(importFile);
+          const id = existingId && importFile === file ? existingId : database.createMovieId(importFile);
           const key = duplicateKey(file);
           const previous = autoResolveDuplicates ? preferred.get(key) : null;
           if (previous && quality(file) <= quality(previous.file)) { duplicatesResolved++; skipped++; continue; }
-          database.upsertMovie({ id, title, year: year ? Number(year[1]) : null, videoId, sourcePath: importFile, folderPath: directory, libraryMode: mode, resolution, posterUrl: null, posterSource: 'none', actresses: [], keywords: [] });
+          database.upsertMovie({ id, title: priorMovie?.title || title, year: priorMovie?.year ?? (year ? Number(year[1]) : null), videoId: priorMovie?.videoId || videoId, sourcePath: importFile, folderPath: directory, libraryMode: priorMovie?.libraryMode || mode, resolution: priorMovie?.resolution || resolution, posterUrl: priorMovie?.posterUrl || null, posterSource: priorMovie?.posterSource || "none", actresses: priorMovie?.actresses || [], keywords: priorMovie?.keywords || [] });
           for (const subtitle of localSubtitles) {
             const subStem = path.basename(subtitle.name, path.extname(subtitle.name)).toLowerCase();
             const videoStem = stem.toLowerCase();
@@ -138,6 +142,8 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
             preferred.set(key, { id, file, existing: false });
           }
           imported++;
+          await importHistory.record(importFile, id);
+          if (importFile !== file) await importHistory.record(file, id, importFile);
           await downloadCaptions(id, importFile);
         } catch (error) { skipped++; warning(file, error); }
         report('processing', root, file);
@@ -149,7 +155,8 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
   async function worker() { while (!cancelToken.cancelled && nextRoot < scanRoots.length) { const root = scanRoots[nextRoot++]; await scanRoot(root); } }
   try { await Promise.all(Array.from({ length: Math.min(3, scanRoots.length) }, () => worker())); }
   finally { clearInterval(heartbeat); }
+  importHistory.flush();
   report(cancelToken.cancelled ? 'cancelled' : 'completed', null, null, true);
-  return { discovered, imported, skipped, skippedUnrecognized, duplicatesResolved, errors, subtitleSearchLogs, invalidFiles, duplicateGroups: [], scannedRoots, cancelled: Boolean(cancelToken.cancelled) };
+  return { discovered, imported, skipped, skippedAlreadyScanned, skippedUnrecognized, duplicatesResolved, errors, subtitleSearchLogs, invalidFiles, duplicateGroups: [], scannedRoots, cancelled: Boolean(cancelToken.cancelled) };
 }
 module.exports = { connectedDrives, scanWholeSystem, within };

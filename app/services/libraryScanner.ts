@@ -128,6 +128,8 @@ export async function scanLibraries(
   };
   const metadataSettings = database.getMetadataSettings();
   const organizationSettings = database.getOrganizationSettings();
+  const importHistory = require("./scanImportHistory.cjs").createScanImportHistory(database, cancelToken);
+  let skippedAlreadyScanned = 0;
   let imported = 0;
   let skipped = 0;
   let processedFiles = 0;
@@ -179,7 +181,9 @@ export async function scanLibraries(
             discoveredPaths.add(key);
             return true;
           });
-          candidates.push(...await Promise.all(batch.map(async (videoFile) => ({
+          const checks = await Promise.all(batch.map(async (file: string) => { if (await importHistory.shouldSkip(file)) { skipped++; skippedAlreadyScanned++; return false; } return true; }));
+          const eligibleBatch = batch.filter((_, index) => checks[index]);
+          candidates.push(...await Promise.all(eligibleBatch.map(async (videoFile) => ({
             mode: libraryMode,
             root,
             videoFile,
@@ -196,6 +200,7 @@ export async function scanLibraries(
 
   const totalFiles = candidates.length;
   if (totalFiles === 0) {
+    importHistory.flush();
     onProgress?.({
       stage: "completed",
       mode,
@@ -205,11 +210,12 @@ export async function scanLibraries(
       totalFiles: 0,
       imported,
       skipped,
-      message: "No media files were found in the selected folders."
+      message: skippedAlreadyScanned ? `No new or changed movies to import. ${skippedAlreadyScanned} previously scanned movies skipped.` : "No media files were found in the selected folders."
     });
 
     return {
       discovered: 0,
+      skippedAlreadyScanned,
       imported,
       skipped,
       errors,
@@ -370,6 +376,8 @@ export async function scanLibraries(
           keywords: candidate.parsed.keywords
         });
         database.replaceSubtitles(movieId, subtitleRecords);
+                await importHistory.record(processed.videoPath, movieId);
+                if (processed.videoPath !== candidate.videoFile) await importHistory.record(candidate.videoFile, movieId, processed.videoPath);
         imported += 1;
 
         try {
@@ -473,8 +481,10 @@ export async function scanLibraries(
       : `Processed ${processedFiles} files.`
   });
 
+  importHistory.flush();
   return {
     discovered: totalFiles,
+    skippedAlreadyScanned,
     imported,
     skipped,
     errors,

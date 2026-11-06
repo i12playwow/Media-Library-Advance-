@@ -98,6 +98,9 @@ const api = {
     ipcRenderer.invoke("actress:setPrimaryPhoto", name, photoUrl),
   actressSetRegion: (name: string, region: string): Promise<Record<string, string>> =>
     ipcRenderer.invoke("actress:setRegion", name, region),
+  removeMovies: (ids: string[], action: "library" | "trash"): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> => ipcRenderer.invoke("movies:remove", ids, action),
+  linkActressMovies: (name: string, ids: string[]): Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }> => ipcRenderer.invoke("actress:linkMovies", name, ids),
+  librarySummary: (): Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }> => ipcRenderer.invoke("movies:summary"),
   scanWholeSystem: (options: ScanAutomationOptions): Promise<ScanSummary> => ipcRenderer.invoke("movies:scanWholeSystem", options),
   selectMovieModeIds: (mode: LibraryMode): Promise<string[]> => ipcRenderer.invoke("movies:selectModeIds", mode),
   listAllMovies: (): Promise<MovieRecord[]> =>

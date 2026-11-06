@@ -225,6 +225,20 @@ export function App() {
     [movies, selectedMovieId]
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  async function removeMovies(ids: string[], action: "library" | "trash"): Promise<void> {
+    if (!desktopApi) return;
+    setContextMenu(null);
+    try {
+      const result = await desktopApi.removeMovies(ids, action);
+      if (result.cancelled) return;
+      const removed = new Set(result.removed);
+      setSelectedIds(current => current.filter(id => !removed.has(id)));
+      setStatusMessage("Removed " + removed.size + " movie(s)." + (result.failed.length ? " " + result.failed.length + " could not be removed: " + result.failed[0].error : ""));
+      await refreshMovies(deferredSearch);
+      setAllMoviesPool(await desktopApi.listAllMovies());
+    } catch (error) { setStatusMessage(error instanceof Error ? error.message : "Could not remove movies."); }
+  }
+
   const organizationPreview = useMemo(
     () => buildOrganizationPreview(organizationDraft, selectedMovie),
     [organizationDraft, selectedMovie]
@@ -540,6 +554,7 @@ export function App() {
           if (page !== "actresses") setSelectedActress(null);
         }}
         movies={movies}
+        gentleUnlocked={appState?.gentleUnlocked ?? false}
         totalMovies={movieTotalCount}
         normalCount={movieModeCounts.normal}
         gentleCount={movieModeCounts.gentle}
@@ -591,6 +606,7 @@ export function App() {
             selectMissingPosterTitles={selectMissingPosterTitles}
             handleRefreshSelectedPosters={handleRefreshSelectedPosters}
             handleBatchMove={handleBatchMove}
+            onRemoveMovies={removeMovies}
             loadMoreMovies={loadMoreMovies}
             PAGE_SIZE={PAGE_SIZE}
             onPlayMovie={handlePlayMovieFromLibrary}
@@ -632,6 +648,17 @@ export function App() {
           selectedActressPhotos={selectedActressPhotos}
           selectedActressRegion={selectedActressRegionDraft}
           setSelectedActressRegion={setSelectedActressRegionDraft}
+          onPlayMovie={(movie) => { void loadMovieIntoPlayer(movie); setPlayerPopupOpen(true); }}
+          onAssignMovies={async (name, ids) => {
+            if (!desktopApi) throw new Error("Desktop connection is unavailable.");
+            const result = await desktopApi.linkActressMovies(name, ids);
+            setAllMoviesPool(await desktopApi.listAllMovies());
+            await refreshMovies(deferredSearch);
+            if (!result.updated.length) throw new Error(result.failed[0]?.error || "No movies were linked.");
+            setSelectedActress(result.name);
+            setStatusMessage("Linked " + result.updated.length + " movie(s) to " + result.name + ".");
+            if (result.failed.length) throw new Error(result.failed.length + " movie(s) could not be linked: " + result.failed[0].error);
+          }}
           onAddActressPhoto={async (name) => {
             if (!desktopApi) return;
             const updated = await desktopApi.actressSetPhoto(name);
@@ -766,6 +793,8 @@ export function App() {
             setContextMenu(null);
           }}
           onToggleSelect={() => { toggleSelected(contextMenu.movie.id); setContextMenu(null); }}
+          onRemoveLibrary={() => void removeMovies([contextMenu.movie.id], "library")}
+          onTrashFile={() => void removeMovies([contextMenu.movie.id], "trash")}
           onCopyPath={() => { void navigator.clipboard.writeText(contextMenu.movie.sourcePath); setContextMenu(null); }}
           onCopyVideoId={contextMenu.movie.videoId ? () => { void navigator.clipboard.writeText(contextMenu.movie.videoId!); setContextMenu(null); } : undefined}
         />

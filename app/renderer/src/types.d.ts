@@ -45,8 +45,11 @@ declare global {
       listMovies: (query?: string, limit?: number, offset?: number) => Promise<MovieRecord[]>;
       countMovies: (query?: string) => Promise<number>;
       countMoviesByMode: (query?: string) => Promise<MovieModeCounts>;
+      linkActressMovies: (name: string, ids: string[]) => Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }>;
+      librarySummary: () => Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }>;
       scanWholeSystem: (options: ScanAutomationOptions) => Promise<ScanSummary>;
       selectMovieModeIds: (mode: LibraryMode) => Promise<string[]>;
+      removeMovies: (ids: string[], action: "library" | "trash") => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
       listAllMovies: () => Promise<MovieRecord[]>;
       ensureMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
       refreshMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;

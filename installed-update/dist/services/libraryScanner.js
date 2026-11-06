@@ -44,6 +44,8 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
     };
     const metadataSettings = database.getMetadataSettings();
     const organizationSettings = database.getOrganizationSettings();
+    const importHistory = require("./scanImportHistory.cjs").createScanImportHistory(database, cancelToken);
+    let skippedAlreadyScanned = 0;
     let imported = 0;
     let skipped = 0;
     let processedFiles = 0;
@@ -51,6 +53,7 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
     const subtitleSearchLogs = [];
     const invalidFiles = [];
     const candidates = [];
+    const discoveryPaths = new Set();
     onProgress?.({
         stage: "preparing",
         mode,
@@ -81,8 +84,10 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
                 });
                 for (let offset = 0; offset < videoFiles.length; offset += 16) {
                     if (cancelToken?.cancelled) break;
-                    const batch = videoFiles.slice(offset, offset + 16).filter(file => { if (isJavMoviePath(file)) return true; skipped++; return false; });
-                    candidates.push(...await Promise.all(batch.map(async videoFile => ({
+                    const batch = videoFiles.slice(offset, offset + 16).filter(file => { const key = process.platform === "win32" ? node_path_1.default.resolve(file).toLowerCase() : node_path_1.default.resolve(file); if (discoveryPaths.has(key)) return false; discoveryPaths.add(key); if (isJavMoviePath(file)) return true; skipped++; return false; });
+                    const checks = await Promise.all(batch.map(async (file) => { if (await importHistory.shouldSkip(file)) { skipped++; skippedAlreadyScanned++; return false; } return true; }));
+          const eligibleBatch = batch.filter((_, index) => checks[index]);
+          candidates.push(...await Promise.all(eligibleBatch.map(async videoFile => ({
                         mode: libraryMode, root, videoFile,
                         parsed: parseMetadata(node_path_1.default.basename(videoFile, node_path_1.default.extname(videoFile))),
                         fileSize: await getFileSize(videoFile)
@@ -109,6 +114,7 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
     candidates.push(...uniqueCandidates);
     const totalFiles = candidates.length;
     if (totalFiles === 0) {
+    importHistory.flush();
         onProgress?.({
             stage: "completed",
             mode,
@@ -118,10 +124,11 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
             totalFiles: 0,
             imported,
             skipped,
-            message: "No media files were found in the selected folders."
+            message: skippedAlreadyScanned ? `No new or changed movies to import. ${skippedAlreadyScanned} previously scanned movies skipped.` : "No media files were found in the selected folders."
         });
         return {
             discovered: 0,
+      skippedAlreadyScanned,
             imported,
             skipped,
             errors,
@@ -256,6 +263,8 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
                     keywords: candidate.parsed.keywords
                 });
                 database.replaceSubtitles(movieId, subtitleRecords);
+                await importHistory.record(processed.videoPath, movieId);
+                if (processed.videoPath !== candidate.videoFile) await importHistory.record(candidate.videoFile, movieId, processed.videoPath);
                 imported += 1;
                 importedFromGroup = scanOptions.importBetterQuality;
                 try {
@@ -309,8 +318,10 @@ async function scanLibraries(database, rootsToScan = database.getRoots(), option
             ? `Scan stopped after ${processedFiles} files. Imported ${imported}.`
             : `Processed ${processedFiles} files.`
     });
-    return {
+    importHistory.flush();
+  return {
         discovered: totalFiles,
+    skippedAlreadyScanned,
         imported,
         skipped,
         errors,
