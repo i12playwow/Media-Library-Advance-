@@ -58,7 +58,7 @@ export function ScanOptionsDialog({
                 onChangeScanOption("autoDownloadSubtitleFromSubtitleCat", false);
                 onChangeScanOption("importOnlyCompleteVideos", true);
                 onChangeScanOption("importBetterQuality", false);
-                onChangeScanOption("resolveLongPath", false);
+
                 onChangeScanOption("scanAllSubfolders", true);
                 onChangeScanOption("autoMatchSubtitle", true);
               }} />
@@ -176,12 +176,11 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                disabled={systemScan}
                 checked={scanOptionsDraft.resolveLongPath}
                 onChange={(e) => onChangeScanOption("resolveLongPath", e.target.checked)}
                 type="checkbox"
               />
-              <span>Resolve long file paths (applies when moving or renaming)</span>
+              <span>{systemScan ? "Resolve long file paths for new MP4 and subtitle files (keep originals unchanged)" : "Resolve long file paths (applies when moving or renaming)"}</span>
             </label>
             <label className="toggle-field">
               <input
@@ -202,7 +201,6 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                disabled={systemScan}
                 checked={scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
                 onChange={(e) =>
                   onChangeScanOption("autoDownloadSubtitleFromSubtitleCat", e.target.checked)

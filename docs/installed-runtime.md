@@ -1,6 +1,6 @@
 # Maintained installed runtime
 
-The desktop updates in this work folder are version 1.0.24. The installed release was newer than the original TypeScript checkout, so `installed-update/` retains the complete working runtime alongside the source edits. Its JavaScript, renderer assets, package metadata, icons, and Sub-Gen script are intentionally versioned; dependencies, native binaries, user databases, test media, and installer archives are excluded.
+The desktop updates in this work folder are version 1.0.26. The installed release was newer than the original TypeScript checkout, so `installed-update/` retains the complete working runtime alongside the source edits. Its JavaScript, renderer assets, package metadata, icons, and Sub-Gen script are intentionally versioned; dependencies, native binaries, user databases, test media, and installer archives are excluded.
 
 The root TypeScript project remains useful for unit tests and source development. Its build is not a replacement for the maintained runtime snapshot: some previously installed features are present only in that snapshot. Port them back into the TypeScript project before replacing the deployed application with a root build.
 
@@ -21,3 +21,5 @@ The live regression scripts are `tests/runtime/missing-pagination.cjs`, `tests/r
 Before packaging, install the snapshot's dependencies with the Electron-compatible native ABI. Package `installed-update/` with `@electron/asar`, unpacking native `.node`, `.exe`, and `.dll` files. Keep new packages and installation backups under ignored `diagnostics/`. Do not package a user profile, library database, model download, or generated test video.
 
 The root build runs scripts/copy-runtime-assets.cjs after TypeScript and Vite so CommonJS service helpers and renderer support assets accompany the compiled output. Playwright discovers only .spec.ts files; run the Node service tests separately.
+
+Runtime 1.0.26 enables whole-system subtitle downloads and long-path controls. New regression scripts tests/runtime/subtitle-scan.cjs and tests/runtime/long-path-option.cjs cover selectable controls, caption saving, and shortened output filenames. Use native-only ASAR unpacking for archive updates to a full installer build; unpacking whole dependency folders would require copying their JavaScript files outside the archive too.

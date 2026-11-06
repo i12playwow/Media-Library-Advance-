@@ -38,6 +38,8 @@ async function downloadContent(url, redirects = 0) {
 class SubtitleWorkspace {
   constructor(database, options = {}) {
     this.database = database;
+    this.resolveLongPath = options.resolveLongPath !== false;
+    this.canSave = options.canSave || (() => true);
     this.searchProvider = options.searchProvider || (query => require('./subtitleCat.js').fetchSubtitleCatResults(query));
     this.downloadProvider = options.downloadProvider || downloadContent;
     this.results = new Map(); this.downloads = new Map(); this.captionCache = options.downloadProvider ? new Map() : sharedCaptionCache; this.completed = new Map();
@@ -100,6 +102,7 @@ class SubtitleWorkspace {
     if (this.downloads.has(key)) return this.downloads.get(key);
     const pending = (async () => {
       const raw = await this.caption(result.downloadUrl);
+      if (!this.canSave()) throw new Error("Subtitle download cancelled.");
       const content = toVtt(raw);
       const language = /^[a-z]{2}(?:-[a-z]{2,4})?$/i.test(result.languageCode || '') ? result.languageCode.toLowerCase() : 'und';
       const extension = /^\uFEFF?WEBVTT/.test(raw) || raw.trimStart().startsWith('WEBVTT') ? '.vtt' : '.srt';
@@ -108,7 +111,8 @@ class SubtitleWorkspace {
       try {
         for (let index = 0; index < 100; index++) {
           name = `${stem}.${language}${index ? '.' + index : ''}${extension}`;
-          const target = path.join(path.dirname(movie.sourcePath), name);
+          const target = require("./generatedFilePath.cjs").generatedFilePath(path.dirname(movie.sourcePath), stem, `.${language}${index ? "." + index : ""}${extension}`, this.resolveLongPath);
+          name = path.basename(target);
           try { await fs.writeFile(target, raw, { encoding: 'utf8', flag: 'wx' }); } catch (error) { if (error.code === 'EEXIST') continue; throw error; }
           this.database.upsertSubtitle(id, target, language); saved = true; break;
         }

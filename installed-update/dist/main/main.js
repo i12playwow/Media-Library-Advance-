@@ -850,7 +850,7 @@ function registerHandlers() {
         emitScanProgress({ stage: "preparing", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: "Whole-system scan: finding connected drives..." });
         try {
             const roots = await scanner.connectedDrives({ cancelToken: activeScanToken });
-            const summary = await scanner.scanWholeSystem(database, { roots, validateComplete: options?.importOnlyCompleteVideos !== false, autoConvertToMp4: Boolean(options?.autoConvertToMp4), autoResolveDuplicates: Boolean(options?.autoResolveDuplicates), mode, cancelToken: activeScanToken, onProgress: emitScanProgress, excludedPaths: [electron_1.app.getPath("userData")] });
+            const summary = await scanner.scanWholeSystem(database, { roots, resolveLongPath: options?.resolveLongPath !== false, autoDownloadSubtitleFromSubtitleCat: Boolean(options?.autoDownloadSubtitleFromSubtitleCat), preferredSubtitleLanguage: options?.preferredSubtitleLanguage || "en", validateComplete: options?.importOnlyCompleteVideos !== false, autoConvertToMp4: Boolean(options?.autoConvertToMp4), autoResolveDuplicates: Boolean(options?.autoResolveDuplicates), mode, cancelToken: activeScanToken, onProgress: emitScanProgress, excludedPaths: [electron_1.app.getPath("userData")] });
             if (!summary.cancelled) database.appendScanHistory(summary);
             return summary;
         } catch (error) { emitScanProgress({ stage: "cancelled", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: error.message || "Whole-system scan stopped." }); throw error; } finally { activeScanToken = null; database.clearFileExistsCache(); }

@@ -31,12 +31,14 @@ function within(file, directory) {
   const relative = path.relative(directory, file);
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
 }
-async function scanWholeSystem(database, { roots, validateComplete = true, autoConvertToMp4 = false, javOnly = true, autoResolveDuplicates = false, mode = 'normal', cancelToken = { cancelled: false }, onProgress, excludedPaths = [], directoryTimeoutMs = 12000, heartbeatMs = 500, readDirectory = (directory) => fs.readdir(directory, { withFileTypes: true }) } = {}) {
+async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDownloadSubtitleFromSubtitleCat = false, preferredSubtitleLanguage = "en", validateComplete = true, autoConvertToMp4 = false, javOnly = true, autoResolveDuplicates = false, mode = 'normal', cancelToken = { cancelled: false }, onProgress, excludedPaths = [], directoryTimeoutMs = 12000, heartbeatMs = 500, readDirectory = (directory) => fs.readdir(directory, { withFileTypes: true }) } = {}) {
   if (!['normal', 'gentle'].includes(mode)) throw new Error('Choose Normal or Gentle mode.');
   const scanRoots = [...new Set((roots || await connectedDrives()).map(root => path.resolve(root)))];
   if (!scanRoots.length && !cancelToken.cancelled) throw new Error('No accessible drives were found. Connect a drive and try again.');
   let imported = 0, skipped = 0, discovered = 0, directories = 0, lastProgress = 0;
-  const invalidFiles = [];
+  const invalidFiles = [], subtitleSearchLogs = [];
+  const downloadMissingSubtitle = autoDownloadSubtitleFromSubtitleCat ? require("./scanSubtitleDownload.cjs").createScanSubtitleDownloader(database, { language: preferredSubtitleLanguage, resolveLongPath, cancelToken }) : null;
+  async function downloadCaptions(id, file) { if (downloadMissingSubtitle && !cancelToken.cancelled) { report("processing", null, file, true); const result = await downloadMissingSubtitle(id, mode); if (subtitleSearchLogs.length < 500) subtitleSearchLogs.push(file + ": " + result); } }
   const errors = [], seen = new Set(), preferred = new Map();
   let duplicatesResolved = 0, skippedUnrecognized = 0;
   function duplicateKey(file) { return path.basename(file, path.extname(file)).toLowerCase().replace(/\b(2160|1080|720|480)p\b|\b4k\b/g, " ").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim(); }
@@ -97,6 +99,7 @@ async function scanWholeSystem(database, { roots, validateComplete = true, autoC
                 duplicatesResolved++;
               }
             }
+            await downloadCaptions(existingId, file);
             skipped++; report('processing', root, file);
             if (discovered % 32 === 0) await new Promise(resolve => setImmediate(resolve));
             continue;
@@ -108,7 +111,7 @@ async function scanWholeSystem(database, { roots, validateComplete = true, autoC
           }
           let importFile = file;
           if (autoConvertToMp4 && path.extname(file).toLowerCase() !== ".mp4") {
-            const target = path.join(directory, path.basename(file, path.extname(file)) + ".mp4");
+            const target = require("./generatedFilePath.cjs").generatedFilePath(directory, path.basename(file, path.extname(file)), ".mp4", resolveLongPath);
             await require("./videoImport.cjs").convertVideoToMp4(file, target, { cancelToken });
             importFile = target;
           }
@@ -135,6 +138,7 @@ async function scanWholeSystem(database, { roots, validateComplete = true, autoC
             preferred.set(key, { id, file, existing: false });
           }
           imported++;
+          await downloadCaptions(id, importFile);
         } catch (error) { skipped++; warning(file, error); }
         report('processing', root, file);
         if (discovered % 32 === 0) await new Promise(resolve => setImmediate(resolve));
@@ -146,6 +150,6 @@ async function scanWholeSystem(database, { roots, validateComplete = true, autoC
   try { await Promise.all(Array.from({ length: Math.min(3, scanRoots.length) }, () => worker())); }
   finally { clearInterval(heartbeat); }
   report(cancelToken.cancelled ? 'cancelled' : 'completed', null, null, true);
-  return { discovered, imported, skipped, skippedUnrecognized, duplicatesResolved, errors, subtitleSearchLogs: [], invalidFiles, duplicateGroups: [], scannedRoots, cancelled: Boolean(cancelToken.cancelled) };
+  return { discovered, imported, skipped, skippedUnrecognized, duplicatesResolved, errors, subtitleSearchLogs, invalidFiles, duplicateGroups: [], scannedRoots, cancelled: Boolean(cancelToken.cancelled) };
 }
 module.exports = { connectedDrives, scanWholeSystem, within };
