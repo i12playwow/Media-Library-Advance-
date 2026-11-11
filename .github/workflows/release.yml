@@ -42,7 +42,7 @@ jobs:
       - name: Package Windows installer
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run dist -- --config.win.signAndEditExecutable=false
+        run: npm run dist -- --publish never --config.win.signAndEditExecutable=false
 
       - name: Publish GitHub release
         env:
