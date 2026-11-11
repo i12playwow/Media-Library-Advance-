@@ -9,6 +9,7 @@
   --secondary: #6cc6bb;
   --secondary-soft: rgba(108, 198, 187, 0.16);
   --shadow: 0 28px 90px rgba(0, 0, 0, 0.4);
+  --danger: #ff6b6b;
   font-family: "Segoe UI", "Inter", sans-serif;
 }
 
@@ -23,6 +24,7 @@
   --secondary: #0e7e79;
   --secondary-soft: rgba(14, 126, 121, 0.1);
   --shadow: 0 24px 60px rgba(35, 28, 18, 0.13);
+  --danger: #c93c37;
 }
 
 * {
@@ -344,6 +346,16 @@ code {
   display: flex;
   gap: 0.8rem;
   flex-wrap: wrap;
+}
+
+.gentle-save-status {
+  color: var(--secondary);
+  font-weight: 600;
+  min-height: 1.2em;
+}
+
+.gentle-save-status.is-error {
+  color: var(--danger);
 }
 
 .search-input {

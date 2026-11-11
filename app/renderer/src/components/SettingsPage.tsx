@@ -20,6 +20,11 @@ interface OrganizationPreview {
   fileName: string;
 }
 
+interface GentleSaveStatus {
+  message: string;
+  tone: "success" | "error";
+}
+
 interface SettingsPageProps {
   appState: AppShellState;
 
@@ -86,8 +91,9 @@ export function SettingsPage({
   onPickLibraryFolder
 }: SettingsPageProps) {
   const whisperModels: SubtitleGenerationModel[] = ["small", "medium", "large-v3"];
+  const gentleShortcutInputId = "gentle-shortcut-key";
   const [gentleShortcutDraft, setGentleShortcutDraft] = useState("");
-  const [gentleSaveStatus, setGentleSaveStatus] = useState<string | null>(null);
+  const [gentleSaveStatus, setGentleSaveStatus] = useState<GentleSaveStatus | null>(null);
   const [subtitleModelStatuses, setSubtitleModelStatuses] = useState<SubtitleModelAvailability[]>([]);
   const [isRefreshingSubtitleModels, setIsRefreshingSubtitleModels] = useState(false);
 
@@ -122,16 +128,16 @@ export function SettingsPage({
     setGentleSaveStatus(null);
     try {
       const nextShortcut = gentleShortcutDraft.trim() || "Ctrl+Alt+D";
-      await window.desktopApi.setGentleShortcut(gentleShortcutDraft.trim());
+      await window.desktopApi.setGentleShortcut(nextShortcut);
       window.dispatchEvent(
         new CustomEvent("mla:gentleShortcutChanged", {
           detail: nextShortcut,
         })
       );
       setGentleShortcutDraft(nextShortcut);
-      setGentleSaveStatus("Saved!");
+      setGentleSaveStatus({ message: "Saved!", tone: "success" });
     } catch (e) {
-      setGentleSaveStatus("Failed to save");
+      setGentleSaveStatus({ message: "Failed to save", tone: "error" });
     }
   };
   return (
@@ -532,9 +538,10 @@ export function SettingsPage({
           <p className="eyebrow">Gentle mode security</p>
           <h3>In-app unlock shortcut</h3>
           <div className="settings-form">
-            <label>
-              Shortcut key
+            <label className="form-field" htmlFor={gentleShortcutInputId}>
+              <span>Shortcut key</span>
               <input
+                id={gentleShortcutInputId}
                 type="text"
                 placeholder="Ctrl+Alt+D"
                 value={gentleShortcutDraft}
@@ -552,7 +559,12 @@ export function SettingsPage({
               >
                 Save unlock shortcut
               </button>
-              {gentleSaveStatus && <span style={{ marginLeft: 12 }}>{gentleSaveStatus}</span>}
+              <span
+                className={`gentle-save-status${gentleSaveStatus?.tone === "error" ? " is-error" : ""}`}
+                aria-live="polite"
+              >
+                {gentleSaveStatus?.message ?? ""}
+              </span>
             </div>
           </div>
         </div>

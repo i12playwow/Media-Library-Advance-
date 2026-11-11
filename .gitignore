@@ -101,6 +101,9 @@ dist
 out
 *.tsbuildinfo
 
+# electron-builder output (installer, unpacked build, debug artifacts)
+dist_electron*/
+
 # Azure Functions artifacts
 bin
 obj
