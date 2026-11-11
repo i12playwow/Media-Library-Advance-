@@ -187,7 +187,7 @@ class DatabaseClient {
         const limit = options?.limit ?? 200;
         const offset = options?.offset ?? 0;
         const sortRecency = (options?.sortOrder ?? "rank") === "recency";
-        const filter = this.buildSearchFilter(includeGentle, query);
+        const filter = this.buildSearchFilter(includeGentle, query, options?.mode);
         const baseClauses = [];
         const baseParams = [];
         if (!includeGentle) {
@@ -308,12 +308,14 @@ class DatabaseClient {
      *  over title/video_id/path/actresses/keywords); shorter queries and
      *  non-FTS databases fall back to LIKE. source_missing is always filtered
      *  via the persisted flag — no per-row stat on the hot path. */
-    buildSearchFilter(includeGentle, query) {
+    buildSearchFilter(includeGentle, query, mode) {
         const clauses = [];
         const params = [];
         if (!includeGentle) {
             clauses.push("library_mode = 'normal'");
         }
+        if (mode === "normal") clauses.push("library_mode = 'normal'");
+        if (mode === "gentle") clauses.push("library_mode = 'gentle'");
         clauses.push("source_missing = 0");
         const trimmed = query.trim();
         if (!trimmed) {
@@ -607,7 +609,7 @@ class DatabaseClient {
         const params = [];
         const includeGentle = options?.includeGentle ?? false;
         const query = options?.query?.trim() ?? "";
-        const filter = this.buildSearchFilter(includeGentle, query);
+        const filter = this.buildSearchFilter(includeGentle, query, options?.mode);
         clauses.push(...filter.clauses);
         if (filter.ftsMatchClause) {
             clauses.push(filter.ftsMatchClause);
@@ -858,6 +860,14 @@ class DatabaseClient {
      *  and remaps subtitle rows that referenced the old folder (relative-name
      *  matches — the common move-the-whole-folder case). Returns false when
      *  the movie does not exist. */
+    relinkMissingMovie(movie, input) {
+        return this.db.transaction(() => {
+            const current = this.db.prepare("SELECT source_path, updated_at, source_missing FROM movies WHERE id = ?").get(movie.id);
+            if (!current?.source_missing || current.source_path !== movie.sourcePath || current.updated_at !== movie.updatedAt) return false;
+            const occupied = this.db.prepare("SELECT 1 FROM movies WHERE source_path = ? COLLATE NOCASE AND id <> ?").get(input.sourcePath, movie.id);
+            return !occupied && this.relinkMovieSourcePath(movie.id, input);
+        })();
+    }
     relinkMovieSourcePath(id, input) {
         const row = this.db
             .prepare("SELECT source_path, folder_path FROM movies WHERE id = ?")
@@ -877,8 +887,12 @@ class DatabaseClient {
             .prepare("SELECT id, path FROM subtitles WHERE movie_id = ?")
             .all(id);
         for (const subtitle of subtitles) {
-            if (subtitle.path.startsWith(row.folder_path)) {
-                const nextSubtitlePath = node_path_1.default.join(input.folderPath, node_path_1.default.relative(row.folder_path, subtitle.path));
+            const nextSubtitlePath = input.verifiedSubtitles
+                ? input.verifiedSubtitles.get(subtitle.path)
+                : subtitle.path.startsWith(row.folder_path)
+                    ? node_path_1.default.join(input.folderPath, node_path_1.default.relative(row.folder_path, subtitle.path))
+                    : null;
+            if (nextSubtitlePath) {
                 this.db
                     .prepare("UPDATE subtitles SET path = ? WHERE id = ?")
                     .run(nextSubtitlePath, subtitle.id);
@@ -888,6 +902,10 @@ class DatabaseClient {
         this.invalidateFileExistsCache(row.source_path, input.sourcePath);
         return true;
     }
+    updateMovieMode(id, mode) {
+      this.db.prepare("UPDATE movies SET library_mode = ?, updated_at = ? WHERE id = ?").run(mode, new Date().toISOString(), id);
+    }
+
     updateMovieLocation(id, input) {
         const previous = this.db
             .prepare("SELECT source_path FROM movies WHERE id = ?")

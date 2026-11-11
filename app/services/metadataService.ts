@@ -42,6 +42,7 @@ interface ImdbSuggestionResponse {
 }
 
 export interface OnlineMovieMetadata {
+  pageTitle?: string;
   actresses: string[];
   modelName: string | null;
   posterUrl: string | null;
@@ -52,6 +53,28 @@ export interface OnlineMovieMetadata {
 let tmdbPosterBaseUrlCache = "";
 let tmdbPosterBaseUrlCacheKey = "";
 const onlineMovieMetadataCache = new Map<string, OnlineMovieMetadata | null>();
+const POSTER_REQUEST_TIMEOUT_MS = 15_000;
+const reportedProviderFailures = new Set<string>();
+
+function reportProviderFailure(provider: MetadataSourceKind, error: unknown): void {
+  const reason = error instanceof Error ? error.name : typeof error;
+  const key = `${provider}:${reason}`;
+  if (reportedProviderFailures.has(key)) {
+    return;
+  }
+  reportedProviderFailures.add(key);
+  console.warn(`[metadata] ${provider} request failed (${reason}); continuing fallback chain.`);
+}
+
+function posterRequestOptions(init?: RequestInit): RequestInit {
+  const timeoutSignal = AbortSignal.timeout(POSTER_REQUEST_TIMEOUT_MS);
+  return {
+    ...init,
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal
+  };
+}
 
 // Actress-photo misses are marked in-memory only: persisting a marker row
 // would leak into the photo-gallery readers, and re-fetching a 404 on a
@@ -111,7 +134,7 @@ export async function enrichMoviePoster(
   }
 
   // Persist the SPECIFIC source so the UI can attribute the cover to the
-  // site that served it ("web" remains the legacy fallback).
+  // site that served it.
   database.updateMoviePoster(movieId, webMetadata.posterUrl, webMetadata.source ?? "web");
   return webMetadata.posterUrl;
 }
@@ -194,12 +217,12 @@ async function searchTmdbMovie(
     params.set("year", String(movie.year));
   }
 
-  const response = await fetch(`https://api.themoviedb.org/3/search/movie?${params.toString()}`, {
+  const response = await fetch(`https://api.themoviedb.org/3/search/movie?${params.toString()}`, posterRequestOptions({
     headers: {
       Authorization: `Bearer ${settings.tmdbReadAccessToken}`,
       Accept: "application/json"
     }
-  });
+  }));
 
   if (!response.ok) {
     throw new Error(`TMDB search failed with status ${response.status}.`);
@@ -257,12 +280,12 @@ async function getTmdbPosterBaseUrl(settings: MetadataSettings): Promise<string>
     return tmdbPosterBaseUrlCache;
   }
 
-  const response = await fetch("https://api.themoviedb.org/3/configuration", {
+  const response = await fetch("https://api.themoviedb.org/3/configuration", posterRequestOptions({
     headers: {
       Authorization: `Bearer ${settings.tmdbReadAccessToken}`,
       Accept: "application/json"
     }
-  });
+  }));
 
   if (!response.ok) {
     throw new Error(`TMDB configuration failed with status ${response.status}.`);
@@ -364,10 +387,22 @@ export async function fetchOnlineMovieMetadataByVideoId(
       return onlineMovieMetadataCache.get(cacheKey) ?? null;
     }
 
-    const metadata = await fetchJavDatabaseMetadata(candidate);
+    let metadata: OnlineMovieMetadata | null;
+    try {
+      metadata = await fetchJavDatabaseMetadata(candidate);
+    } catch (error) {
+      reportProviderFailure("javdatabase", error);
+      metadata = null;
+    }
     onlineMovieMetadataCache.set(cacheKey, metadata);
     if (metadata) {
       return metadata;
+    }
+
+    const javdbMetadata = await fetchJavDbMetadata(candidate);
+    onlineMovieMetadataCache.set(cacheKey, javdbMetadata);
+    if (javdbMetadata) {
+      return javdbMetadata;
     }
 
     // Second keyless ID site: javdatabase misses are not final. Same
@@ -407,6 +442,19 @@ export async function resolveOnlineMovieMetadata(
       }
     }
 
+    if (strategy === "javdb" && resolvedVideoId) {
+      let javdbMetadata: OnlineMovieMetadata | null = null;
+      try {
+        javdbMetadata = await fetchJavDbMetadata(resolvedVideoId);
+      } catch (error) {
+        reportProviderFailure("javdb", error);
+      }
+      if (javdbMetadata) {
+        onlineMovieMetadataCache.set(cacheKey, javdbMetadata);
+        return javdbMetadata;
+      }
+    }
+
     // Keyless title-based source: fills the no-video-ID gap that previously
     // fell straight through to TMDB (or to nothing, with TMDB gated off).
     if (strategy === "imdb") {
@@ -421,14 +469,19 @@ export async function resolveOnlineMovieMetadata(
       if (!settings.tmdbNonCommercialUse) {
         continue;
       }
-      const tmdbMetadata = await fetchTmdbMovieMetadata(
-        {
-          ...movie,
-          videoId: resolvedVideoId
-        },
-        settings,
-        options
-      );
+      let tmdbMetadata: OnlineMovieMetadata | null = null;
+      try {
+        tmdbMetadata = await fetchTmdbMovieMetadata(
+          {
+            ...movie,
+            videoId: resolvedVideoId
+          },
+          settings,
+          options
+        );
+      } catch (error) {
+        reportProviderFailure("tmdb", error);
+      }
       if (tmdbMetadata) {
         onlineMovieMetadataCache.set(cacheKey, tmdbMetadata);
         return tmdbMetadata;
@@ -487,11 +540,11 @@ function resolveMetadataStrategyOrder(
   }
 
   if (profile === "mainstream-first") {
-    return hasVideoId ? ["imdb", "tmdb", "javdatabase"] : ["imdb", "tmdb"];
+    return hasVideoId ? ["imdb", "tmdb", "javdatabase", "javdb"] : ["imdb", "tmdb"];
   }
 
   if (hasVideoId) {
-    return ["javdatabase", "imdb", "tmdb"];
+    return ["javdatabase", "javdb", "imdb", "tmdb"];
   }
 
   return ["imdb", "tmdb"];
@@ -523,13 +576,13 @@ function buildMetadataCacheKey(
 async function fetchActressPhotoFromJavBus(name: string): Promise<string | null> {
   const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
   try {
-    const response = await fetch(`https://www.javbus.com/star/${slug}/`, {
+    const response = await fetch(`https://www.javbus.com/star/${slug}/`, posterRequestOptions({
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
       }
-    });
+    }));
     if (!response.ok) {
       return null;
     }
@@ -561,7 +614,7 @@ async function fetchActressPhotoFromImdb(name: string): Promise<string | null> {
   try {
     const response = await fetch(
       `https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(term)}.json`,
-      { headers: { Accept: "application/json" } }
+      posterRequestOptions({ headers: { Accept: "application/json" } })
     );
     if (!response.ok) {
       return null;
@@ -598,13 +651,13 @@ async function fetchActressPhotoFromImdb(name: string): Promise<string | null> {
 
 async function fetchActressPhotoFromJavDatabase(name: string): Promise<string | null> {
   const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-  const response = await fetch(`https://www.javdatabase.com/idols/${slug}/`, {
+  const response = await fetch(`https://www.javdatabase.com/idols/${slug}/`, posterRequestOptions({
     headers: {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-  });
+  }));
 
   if (!response.ok) return null;
 
@@ -618,19 +671,63 @@ async function fetchActressPhotoFromJavDatabase(name: string): Promise<string | 
   return imgMatch?.[1] ?? null;
 }
 
+// Dedicated fetcher for JAVDB: many catalog pages expose the poster as the
+// document og:image, so this is a direct site-specific source with its own
+// attribution label.
+async function fetchJavDbMetadata(videoId: string): Promise<OnlineMovieMetadata | null> {
+  for (const candidate of expandVideoIdLookupCandidates(videoId)) {
+    const slug = encodeURIComponent(candidate.toLowerCase());
+    const urls = [
+      `https://javdb.com/v/${slug}`,
+      `https://www.javdb.com/v/${slug}`
+    ];
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, posterRequestOptions({
+          headers: {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+          }
+        }));
+        if (!response.ok) {
+          continue;
+        }
+        const html = await response.text();
+        const posterMatch = html.match(/property="og:image"\s+content="([^"]+)"/i);
+        if (!posterMatch?.[1]) {
+          continue;
+        }
+        return {
+          actresses: [],
+          modelName: candidate.split("-")[0] ?? null,
+          posterUrl: posterMatch[1],
+          source: "javdb",
+          videoId: candidate
+        };
+      } catch (error) {
+        reportProviderFailure("javdb", error);
+      }
+    }
+  }
+
+  return null;
+}
+
 // Second keyless video-ID site (javdatabase misses are not final). Same
 // og:image contract; errors are swallowed as a miss so a blocked or
 // rate-limited site degrades to "no result" instead of aborting the chain.
 async function fetchJavBusMetadata(videoId: string): Promise<OnlineMovieMetadata | null> {
   const slug = videoId.toLowerCase();
   try {
-    const response = await fetch(`https://www.javbus.com/${slug}/`, {
+    const response = await fetch(`https://www.javbus.com/${slug}/`, posterRequestOptions({
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
       }
-    });
+    }));
     if (!response.ok) {
       return null;
     }
@@ -643,7 +740,8 @@ async function fetchJavBusMetadata(videoId: string): Promise<OnlineMovieMetadata
       source: "javbus",
       videoId
     };
-  } catch {
+  } catch (error) {
+    reportProviderFailure("javbus", error);
     return null;
   }
 }
@@ -673,13 +771,14 @@ async function fetchImdbMovieMetadata(
   try {
     const response = await fetch(
       `https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(term.toLowerCase())}.json`,
-      { headers: { Accept: "application/json" } }
+      posterRequestOptions({ headers: { Accept: "application/json" } })
     );
     if (!response.ok) {
       return null;
     }
     payload = (await response.json()) as ImdbSuggestionResponse;
-  } catch {
+  } catch (error) {
+    reportProviderFailure("imdb", error);
     return null;
   }
 
@@ -736,17 +835,19 @@ async function fetchImdbMovieMetadata(
   };
 }
 
-async function fetchJavDatabaseMetadata(
-  videoId: string
+export async function fetchJavDatabaseMetadata(
+  videoId: string,
+  signal?: AbortSignal
 ): Promise<OnlineMovieMetadata | null> {
-  const slug = videoId.toLowerCase();
-  const response = await fetch(`https://www.javdatabase.com/movies/${slug}/`, {
+  const slug = encodeURIComponent(videoId.toLowerCase());
+  const response = await fetch(`https://www.javdatabase.com/movies/${slug}/`, posterRequestOptions({
+    signal,
     headers: {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-  });
+  }));
 
   if (!response.ok) {
     return null;
@@ -765,6 +866,7 @@ async function fetchJavDatabaseMetadata(
     modelName: videoId.split("-")[0] ?? null,
     posterUrl: posterMatch?.[1] ?? null,
     source: "javdatabase",
+    pageTitle: titleMatch?.[1],
     videoId
   };
 }

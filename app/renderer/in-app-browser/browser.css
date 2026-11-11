@@ -1,0 +1,24 @@
+:root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #10151d; color: #e8eef7; }
+body { margin: 0; }
+header { box-sizing: border-box; height: 70px; padding: 8px 12px 0; background: #1a2432; border-bottom: 1px solid #344256; }
+form { display: flex; gap: 6px; }
+button, input { box-sizing: border-box; height: 36px; border: 1px solid #42536a; border-radius: 6px; background: #121923; color: inherit; font: inherit; }
+button { min-width: 36px; padding: 0 10px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+button:hover:not(:disabled) { background: #2e3d52; }
+input { flex: 1; min-width: 0; padding: 0 10px; }
+:focus-visible { outline: 2px solid #8cbeff; outline-offset: 1px; }
+#status { margin: 3px 0 0; font-size: 12px; color: #c2d4ee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main { text-align: center; padding: min(14vh, 100px) 20px; }
+main p { color: #b5c6de; }
+#download-panel { max-width: 850px; margin: 0 auto; padding: 20px; }
+#download-panel h1 { margin-top: 0; }
+textarea { display: block; box-sizing: border-box; width: 100%; margin: 8px 0 12px; padding: 9px; resize: vertical; border: 1px solid #42536a; border-radius: 6px; background: #121923; color: inherit; font: inherit; }
+.download-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#download-list { padding-left: 22px; overflow-wrap: anywhere; }
+#download-list li { margin: 5px 0; }
+#link-picker { margin: 0 0 14px; border: 1px solid #42536a; border-radius: 6px; min-width: 0; }
+#link-choices { max-height: 180px; overflow: auto; margin-top: 6px; }
+#link-choices label { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+#link-choices input { flex: 0 0 auto; height: auto; }
+#link-picker-status { color: #c2d4ee; }

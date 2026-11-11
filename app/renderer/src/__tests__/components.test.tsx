@@ -119,6 +119,11 @@ describe("PosterVisual", () => {
     expect(none.container.querySelector(".poster-source-badge")).toBeNull();
   });
 
+  it("badges JAVDB poster sources", () => {
+    render(<PosterVisual movie={makeMovie({ posterSource: "javdb", posterUrl: "https://example.com/javdb-poster.jpg" })} />);
+    expect(screen.getByText("JAVDB")).toBeInTheDocument();
+  });
+
   it("applies compact class", () => {
     const { container } = render(<PosterVisual movie={makeMovie()} compact />);
     expect((container.firstChild as HTMLElement).className).toBe("poster-visual compact");
@@ -630,11 +635,10 @@ describe("AppSidebar library snapshot", () => {
     );
 
     // The snapshot reports DB totals even though only 2 movies are loaded.
-    expect(await screen.findByText("480 cataloged")).toBeInTheDocument();
-    expect(screen.getByText("480")).toBeInTheDocument(); // Visible titles
-    expect(screen.getByText("450")).toBeInTheDocument(); // Normal mode
-    expect(screen.getByText("30")).toBeInTheDocument(); // Gentle mode
-    expect(screen.queryByText("2 cataloged")).toBeNull();
+    expect(await screen.findByText("480")).toBeInTheDocument();
+    expect(screen.queryByText("450")).toBeNull();
+    expect(screen.queryByText("30")).toBeNull();
+    expect(screen.queryByText("2")).toBeNull();
     } finally { window.desktopApi = previousApi; }
   });
 })

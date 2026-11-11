@@ -188,6 +188,7 @@ export function getPosterSourceLabel(source: MovieRecord["posterSource"]): strin
     case "javbus": return "javbus poster";
     case "imdb": return "IMDb poster";
     case "tmdb": return "TMDB poster";
+    case "javdb": return "JAVDB poster";
     default: return "No poster yet";
   }
 }
@@ -200,6 +201,7 @@ export function getPosterSourceBadge(source: string): string | null {
     case "javbus": return "JAVBUS";
     case "imdb": return "IMDB";
     case "tmdb": return "TMDB";
+    case "javdb": return "JAVDB";
     case "web": return "WEB";
     case "local": return null; // local frames are the app's own work — no badge
     default: return null;

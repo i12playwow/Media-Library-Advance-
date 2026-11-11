@@ -159,7 +159,7 @@ export function PlayerPage({
   playerOpenFile,
 }: PlayerPageProps) {
   const [isConverting, setIsConverting] = useState(false);
-  const playerMovie = movies.find((m) => m.id === playerMovieId) ?? null;
+  const playerMovie = movies.find((m) => m.id === playerMovieId) ?? allMoviesPool.find((m) => m.id === playerMovieId) ?? null;
   const allPlayerMovies = allMoviesPool.length > 0 ? allMoviesPool : movies;
   const currentVideoSearchId = (() => {
     if (!playerMovie) return "";

@@ -16,6 +16,7 @@ interface AppSidebarProps {
   pages: PageEntry[];
   activePage: AppPage;
   onNavigate: (page: AppPage) => void;
+  onOpenBrowser?: () => void;
   movies: MovieRecord[];
   /** Full library total for the current filter — computed over the whole DB, not the loaded page. */
   totalMovies: number;
@@ -33,6 +34,7 @@ export const AppSidebar = memo(function AppSidebar({
   pages,
   activePage,
   onNavigate,
+  onOpenBrowser,
   movies,
   totalMovies,
   gentleUnlocked = false,
@@ -69,7 +71,7 @@ export const AppSidebar = memo(function AppSidebar({
           <nav className="nav">
             {pages.map((page) => {
               const requiresLibrary = page.id === "library" || page.id === "search";
-              const isDisabled = requiresLibrary && movies.length === 0;
+              const isDisabled = requiresLibrary && movies.length === 0 && (libraryTotals?.available ?? libraryTotals?.cataloged ?? 0) === 0;
               return (
                 <button
                   key={page.id}
@@ -83,30 +85,16 @@ export const AppSidebar = memo(function AppSidebar({
                 </button>
               );
             })}
+            {onOpenBrowser && (
+              <button className="nav-link" onClick={onOpenBrowser} type="button">
+                Browser
+              </button>
+            )}
           </nav>
 
           <div className="sidebar-footer">
             <p className="status-note">{statusMessage}</p>
-            <div className="sidebar-showcase">
-              <div className="sidebar-showcase-header">
-                <span>Library totals</span>
-                <span>{libraryTotals?.cataloged.toLocaleString() ?? "—"} cataloged</span>
-              </div>
-              <div className="sidebar-summary-grid">
-                <div className="sidebar-summary-card">
-                  <strong>{libraryTotals?.cataloged.toLocaleString() ?? "—"}</strong>
-                  <span>Cataloged movies</span>
-                </div>
-                <div className="sidebar-summary-card">
-                  <strong>{libraryTotals?.normal.toLocaleString() ?? "—"}</strong>
-                  <span>Normal mode</span>
-                </div>
-                <div className="sidebar-summary-card">
-                  <strong>{gentleUnlocked ? libraryTotals?.gentle?.toLocaleString() ?? "—" : "Locked"}</strong>
-                  <span>Gentle mode</span>
-                </div>
-              </div>
-            </div>
+            <div className="sidebar-showcase"><div className="sidebar-showcase-header"><span>Movies</span><strong>{libraryTotals?.cataloged.toLocaleString() ?? "—"}</strong></div></div>
           </div>
         </div>
       </aside>

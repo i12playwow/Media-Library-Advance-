@@ -716,6 +716,18 @@ function languageLabelFromCode(code) {
     return code.length > 0 ? code.toUpperCase() : "Unknown";
 }
 function registerHandlers() {
+    const browser = require("../services/inAppBrowser.cjs").createInAppBrowser({
+        app: electron_1.app, BrowserWindow: electron_1.BrowserWindow, WebContentsView: electron_1.WebContentsView,
+        ipcMain: electron_1.ipcMain, session: electron_1.session
+    });
+    electron_1.ipcMain.handle("app:openBrowser", event => {
+        if (event.sender !== mainWindow?.webContents) throw new Error("Open the browser from the main app window.");
+        browser.open();
+    });
+const playerWindow = require("../services/playerWindow.cjs").createPlayerWindow({app:electron_1.app, BrowserWindow:electron_1.BrowserWindow, ipcMain:electron_1.ipcMain, path:node_path_1.default, database, getMainWindow:()=>mainWindow, isGentleUnlocked:()=>gentleUnlocked, sendMovie:(window,movie)=>window.webContents.send("player:windowMovie",movie)});
+electron_1.ipcMain.handle("player:openWindow",playerWindow.open);
+electron_1.ipcMain.handle("player:getWindowMovie",playerWindow.getMovie);
+    require("../services/subtitleWorkspace.cjs").registerSubtitleWorkspace({ ipcMain: electron_1.ipcMain, getDatabase: () => database, getWindow: () => mainWindow, getPlayerWindow: playerWindow.getWindow, isGentleUnlocked: () => gentleUnlocked });
     electron_1.ipcMain.handle("settings:getGentleShortcut", async () => {
         return database.getGentleShortcut();
     });
@@ -754,13 +766,23 @@ function registerHandlers() {
         return buildShellState();
     });
         const removeMovieEntries = require("../services/movieRemoval.cjs").createMovieRemover({ database, isGentleUnlocked: () => gentleUnlocked, trash: (file) => electron_1.shell.trashItem(file), confirm: async (request) => { const result = await electron_1.dialog.showMessageBox(mainWindow, { type: "warning", title: request.title, message: request.message, detail: request.detail, buttons: ["Cancel", request.button], defaultId: 0, cancelId: 0, noLink: true }); return result.response === 1; } });
-    electron_1.ipcMain.handle("movies:remove", async (event, ids, action) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Stop the scan before removing movies."); return removeMovieEntries(ids, action); });
+    electron_1.ipcMain.handle("movies:remove", async (event, ids, action) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken || movieRenamer.isBusy()) throw new Error("Wait for the scan or rename to finish before removing movies."); return removeMovieEntries(ids, action); });
 const linkActressMovies = require("../services/actressMovies.cjs").createActressMovieLinker({ database, isGentleUnlocked: () => gentleUnlocked });
     electron_1.ipcMain.handle("actress:linkMovies", async (event, name, ids) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Wait for the scan to finish before linking movies."); return linkActressMovies(name, ids); });
+    let actressRescan;
+    electron_1.ipcMain.handle("actress:rescanMetadata", async event => {
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Unavailable outside the main app.");
+        if (activeScanToken || libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the library operation to finish.");
+        actressRescan ??= require("../services/actressMetadataRescan.cjs").rescanActressMetadata(database, {
+            isGentleUnlocked: () => gentleUnlocked, parseNfoXml: libraryLayout_1.parseNfoXml
+        }).finally(() => { actressRescan = undefined; });
+        return actressRescan;
+    });
     electron_1.ipcMain.handle("movies:summary", (event) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); return require("../services/librarySummary.cjs").librarySummary(database, gentleUnlocked); });
     electron_1.ipcMain.handle("movies:list", async (_event, args) => {
         return database.listMovies({
             includeGentle: gentleUnlocked,
+            mode: args?.mode === "gentle" ? "gentle" : args?.mode === "normal" ? "normal" : undefined,
             query: args?.query ?? "",
             limit: args?.limit ?? 200,
             offset: args?.offset ?? 0,
@@ -770,13 +792,14 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     electron_1.ipcMain.handle("movies:count", async (_event, args) => {
         return database.countMovies({
             includeGentle: gentleUnlocked,
+            mode: args?.mode === "gentle" ? "gentle" : args?.mode === "normal" ? "normal" : undefined,
             query: args?.query ?? ""
         });
     });
     // Always returns all movies from both modes — used for actress directory
     electron_1.ipcMain.handle("movies:selectModeIds", (event, mode) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); return require("../services/modeSelection.cjs").selectModeIds(database, mode, gentleUnlocked); });
     electron_1.ipcMain.handle("movies:listAll", async () => {
-        return database.listMovies({ includeGentle: true, query: "", limit: 99999, offset: 0 });
+        return database.listMovies({ includeGentle: gentleUnlocked, query: "", limit: 99999, offset: 0 });
     });
     electron_1.ipcMain.handle("movies:ensurePosters", async (_event, movieIds) => {
         const dedupedIds = Array.from(new Set(movieIds)).filter(Boolean);
@@ -823,6 +846,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
         const rootsToScan = targetMode === "normal"
             ? { normal: result.filePaths, gentle: [] }
             : { normal: [], gentle: result.filePaths };
+        if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
         activeScanToken = (0, libraryScanner_1.createCancelToken)();
         // Scans add/move/delete many files: drop cached existsSync results so
         // views reflect fresh disk state during and after the scan.
@@ -847,6 +871,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     electron_1.ipcMain.handle("movies:scanWholeSystem", async (event, options) => {
         if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
         if (activeScanToken) throw new Error("A scan is already running.");
+        if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
         const mode = resolveTargetMode(options);
         if (mode === "gentle" && !gentleUnlocked) throw new Error("Unlock Gentle mode before scanning into it.");
         const scanner = require("../services/wholeSystemScan.cjs");
@@ -861,6 +886,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
         } catch (error) { emitScanProgress({ stage: "cancelled", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: error.message || "Whole-system scan stopped." }); throw error; } finally { activeScanToken = null; database.clearFileExistsCache(); }
     });
     electron_1.ipcMain.handle("movies:scan", async (_event, options) => {
+        if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
         activeScanToken = (0, libraryScanner_1.createCancelToken)();
         // Scans add/move/delete many files: drop cached existsSync results so
         // views reflect fresh disk state during and after the scan.
@@ -882,7 +908,36 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
             database.clearFileExistsCache();
         }
     });
-    electron_1.ipcMain.handle("scan:cancel", () => {
+    const libraryMove = require("../services/libraryMove.cjs").createLibraryMove({
+    database, dialog: electron_1.dialog, moveMovie: fileService_1.moveMovieToMode,
+    getWindow: () => mainWindow, isUnlocked: () => gentleUnlocked, isScanning: () => Boolean(activeScanToken) || movieRenamer.isBusy()
+  });
+  electron_1.ipcMain.handle("movies:moveMode", (event, id, mode) => libraryMove.run(event, [id], mode));
+  electron_1.ipcMain.handle("movies:batchMoveMode", libraryMove.run);
+  const movieRenamer = require("../services/movieRename.cjs").createMovieRenamer({
+    database, dialog: electron_1.dialog, getWindow: () => mainWindow, isUnlocked: () => gentleUnlocked,
+    canRename: () => !activeScanToken && !libraryMove.isBusy()
+  });
+  electron_1.ipcMain.handle("movies:renameFile", movieRenamer.rename);
+    let refreshTimer;
+    const stopRelink = require("../services/backgroundRelink.cjs").startBackgroundRelink({
+        database,
+        isBusy: () => Boolean(activeScanToken) || libraryMove.isBusy() || movieRenamer.isBusy(),
+        excludedPaths: [electron_1.app.getPath("userData")],
+        onChanged: () => {
+            if (refreshTimer) return;
+            refreshTimer = setTimeout(() => {
+                refreshTimer = undefined;
+                if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("library:availabilityChanged");
+            }, 250);
+        }
+    });
+    stopBackgroundRelink = () => {
+        stopRelink();
+        clearTimeout(refreshTimer);
+    };
+
+  electron_1.ipcMain.handle("scan:cancel", () => {
         if (activeScanToken) {
             activeScanToken.cancelled = true;
         }
@@ -918,16 +973,6 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     });
     electron_1.ipcMain.handle("shell:showInFolder", (_event, filePath) => {
         electron_1.shell.showItemInFolder(filePath);
-    });
-    electron_1.ipcMain.handle("movies:moveMode", async (_event, movieId, mode) => {
-        return (0, fileService_1.moveMovieToMode)(database, movieId, mode);
-    });
-    electron_1.ipcMain.handle("movies:batchMoveMode", async (_event, movieIds, mode) => {
-        const moved = [];
-        for (const movieId of movieIds) {
-            moved.push(await (0, fileService_1.moveMovieToMode)(database, movieId, mode));
-        }
-        return moved;
     });
     electron_1.ipcMain.handle("duplicates:resolve", async (_event, keepPath, deletePaths, gentleUnlocked) => {
         let deleted = 0;
@@ -1194,6 +1239,61 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
             };
         }
     });
+    electron_1.ipcMain.handle("subtitle:addDir", async (event) => {
+        if (!mainWindow || event.sender !== mainWindow.webContents)
+            throw new Error("Use Settings in the main app.");
+        const result = await electron_1.dialog.showOpenDialog(mainWindow, {
+            title: "Add subtitle directory",
+            properties: ["openDirectory", "createDirectory"]
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            database.setSubtitleDirs([...new Set([...database.getSubtitleDirs(), ...result.filePaths])]);
+        }
+        return buildShellState();
+    });
+    electron_1.ipcMain.handle("subtitle:removeDir", async (event, dir) => {
+        if (!mainWindow || event.sender !== mainWindow.webContents)
+            throw new Error("Use Settings in the main app.");
+        database.setSubtitleDirs(database.getSubtitleDirs().filter(existing => existing !== dir));
+        return buildShellState();
+    });
+    electron_1.ipcMain.handle("subtitle:scan", async (event) => {
+        if (!mainWindow || event.sender !== mainWindow.webContents)
+            throw new Error("Use Settings in the main app.");
+        const candidates = [];
+        for (const dir of database.getSubtitleDirs()) {
+            const entries = await node_fs_1.default.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+            for (const entry of entries) {
+                const ext = node_path_1.default.extname(entry.name);
+                if (!entry.isFile() || !contracts_1.SUBTITLE_EXTENSIONS.some(value => value === ext.toLowerCase()))
+                    continue;
+                candidates.push({
+                    stem: node_path_1.default.basename(entry.name, ext).toLowerCase(),
+                    path: node_path_1.default.join(dir, entry.name),
+                    language: (0, libraryScanner_1.extractSubtitleLanguage)(entry.name)
+                });
+            }
+        }
+        const movies = database.listMovies({ includeGentle: gentleUnlocked, limit: Number.MAX_SAFE_INTEGER });
+        const result = { total: movies.length, matched: 0, skipped: 0, unmatched: 0 };
+        for (const movie of movies) {
+            if (movie.subtitles.length > 0) {
+                result.skipped++;
+                continue;
+            }
+            const stem = node_path_1.default.basename(movie.sourcePath, node_path_1.default.extname(movie.sourcePath)).toLowerCase();
+            const match = candidates.find(candidate => candidate.stem === stem || candidate.stem.startsWith(stem + ".") ||
+                candidate.stem.startsWith(stem + "_") || candidate.stem.startsWith(stem + "-"));
+            if (match) {
+                database.upsertSubtitle(movie.id, match.path, match.language);
+                result.matched++;
+            }
+            else {
+                result.unmatched++;
+            }
+        }
+        return result;
+    });
     electron_1.ipcMain.handle("subtitle:generateForMovie", async (_event, movieId, options) => {
         const movie = database.getMovie(movieId);
         if (!movie) {
@@ -1230,14 +1330,12 @@ const userDataOverride = process.env.MLA_USER_DATA_DIR?.trim();
 if (userDataOverride) {
     electron_1.app.setPath("userData", node_path_1.default.resolve(userDataOverride));
 }
+let stopBackgroundRelink;
 electron_1.app.whenReady().then(() => {
     const databasePath = node_path_1.default.join(electron_1.app.getPath("userData"), "mla-plus.db");
     database = new database_1.DatabaseClient(databasePath);
-    require("../services/subtitleWorkspace.cjs").registerSubtitleWorkspace({ ipcMain: electron_1.ipcMain, getDatabase: () => database, getWindow: () => mainWindow, isGentleUnlocked: () => gentleUnlocked });
+
     require("../services/deviceShare.cjs").registerDeviceSharing({ app: electron_1.app, ipcMain: electron_1.ipcMain, getDatabase: () => database, getWindow: () => mainWindow });
-    // Periodically fresh-stat source paths so the persisted source_missing flag
-    // (used by the SQL search filter) tracks reality.
-    database.startMissingSweepTimer();
     electron_1.protocol.registerFileProtocol("mla-media", (request, callback) => {
         try {
             const parsed = new URL(request.url);
@@ -1274,6 +1372,6 @@ electron_1.app.on("window-all-closed", () => {
     }
 });
 electron_1.app.on("before-quit", () => {
-    database?.stopMissingSweepTimer();
+    stopBackgroundRelink?.();
     database?.close();
 });

@@ -118,11 +118,11 @@ export interface MovieRecord {
   updatedAt: string;
 }
 
-export type PosterSource = "none" | "local" | "web" | "javdatabase" | "javbus" | "imdb" | "tmdb";
+export type PosterSource = "none" | "local" | "web" | "javdatabase" | "javbus" | "imdb" | "tmdb" | "javdb";
 
 // The specific web sources behind a poster, persisted in poster_source so
 // the UI can attribute each cover to the site that served it.
-export type MetadataSourceKind = "javdatabase" | "javbus" | "imdb" | "tmdb";
+export type MetadataSourceKind = "javdatabase" | "javbus" | "imdb" | "tmdb" | "javdb";
 
 export interface LibraryRoots {
   normal: string[];
@@ -267,6 +267,7 @@ export interface ScanAutomationOptions {
   importBetterQuality: boolean;
   autoResolveDuplicates: boolean;
   moveRename: boolean;
+  renameOnly?: boolean;
   copyToLibrary: boolean;
   scanAllSubfolders: boolean;
   resolveLongPath: boolean;
@@ -326,3 +327,16 @@ export type GuardsChainSegmentsResult =
   | { status: "verified"; segments: GuardsChainSegment[] }
   | { status: "unverified"; reason: "tampered"; segments: GuardsChainSegment[] | null }
   | { status: "unavailable" };
+
+export interface LibraryMoveResult {
+  moved: string[];
+  failed: Array<{ id: string; error: string }>;
+  skipped: number;
+  cancelled: boolean;
+}
+export interface ActressMetadataRescanSummary {
+  checked: number;
+  updated: number;
+  unknown: number;
+  unreadable: number;
+}

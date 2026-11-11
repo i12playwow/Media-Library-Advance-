@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>MediaLibrary Plus Browser</title>
+  <link rel="stylesheet" href="browser.css">
+  <script src="browser.js" defer></script>
+</head>
+<body>
+  <header>
+    <form>
+      <button id="back" type="button" aria-label="Back" title="Back" disabled>←</button>
+      <button id="forward" type="button" aria-label="Forward" title="Forward" disabled>→</button>
+      <button id="reload" type="button" aria-label="Reload" title="Reload" disabled>↻</button>
+      <input id="address" aria-label="Website address" placeholder="Enter a website address" spellcheck="false" autocomplete="off" autofocus>
+      <button type="submit">Go</button>
+      <button id="downloads" type="button" aria-expanded="false" aria-controls="download-panel">Downloads</button>
+    </form>
+    <p id="status" role="status"></p>
+  </header>
+  <main>
+    <h1>Web Browser</h1>
+    <p>Enter a website address above to get started.</p>
+  </main>
+  <section id="download-panel" hidden aria-labelledby="download-heading">
+    <h1 id="download-heading">Bulk downloads</h1>
+    <button id="find-download-links" type="button">Find links on this page</button>
+    <p id="link-picker-status" role="status"></p>
+    <fieldset id="link-picker" hidden>
+      <legend>Download links found</legend>
+      <button id="select-download-links" type="button">Select all</button>
+      <button id="add-download-links" type="button" disabled>Add selected links</button>
+      <div id="link-choices"></div>
+    </fieldset>
+    <label for="download-links">Direct download links, one per line</label>
+    <textarea id="download-links" rows="5" spellcheck="false" placeholder="https://example.com/file.mp4"></textarea>
+    <div class="download-actions">
+      <button id="start-downloads" type="button">Choose folder and start</button>
+      <button id="resume-downloads" type="button" hidden>Resume after verification</button>
+      <button id="cancel-downloads" type="button" disabled>Cancel queue</button>
+    </div>
+    <p id="download-summary" role="status"></p>
+    <ul id="download-list"></ul>
+  </section>
+</body>
+</html>

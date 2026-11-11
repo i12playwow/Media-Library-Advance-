@@ -163,3 +163,23 @@ describe("SearchPage — download-again skips straight to generation", () => {
     expect(availabilityChecks).toBeGreaterThanOrEqual(1);
   });
 });
+
+ describe('SearchPage direct model download', () => {
+  it('starts from the panel in one click and allows retry after a startup failure', async () => {
+    const download = vi.fn().mockRejectedValueOnce(new Error('Connection unavailable')).mockResolvedValueOnce({ok:true, model:'medium', available:true, modelPath:'C:/models/medium',message:'Ready',setupRequired:false});
+    (window as unknown as {desktopApi:unknown}).desktopApi = {
+      getSubtitleModelAvailability: async () => ({model:'medium',available:false,modelPath:null,message:'Not downloaded'}),
+      onSubtitleModelDownloadProgress: () => () => {}, previewSubtitleOutput:async()=>({outputPath:null,message:null}), downloadSubtitleModel:download
+    };
+    renderSearchPage();
+    await screen.findByText('medium is not installed yet');
+    fireEvent.click(screen.getByRole('button',{name:'Not now'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Download medium'}));
+    await waitFor(()=>expect(download).toHaveBeenCalledTimes(1));
+    await screen.findAllByText(/Unable to start model download: Connection unavailable/);
+    const card=document.querySelector('.modal-card') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button',{name:'Download medium'}));
+    await waitFor(()=>expect(download).toHaveBeenCalledTimes(2));
+    await waitFor(()=>expect(screen.queryAllByRole('button',{name:'Download medium'})).toHaveLength(0));
+  });
+});

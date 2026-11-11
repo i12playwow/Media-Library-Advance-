@@ -38,11 +38,12 @@ skip this table, the lint sends you back here.
 |---|---|---|---|
 | `upsertMovie` | `INSERT INTO movies … ON CONFLICT(id) DO UPDATE` | all five: `title`, `video_id`, `source_path`, `actresses_json`, `keywords_json` | the scanner's and fileService's main entry; the upsert `COALESCE`s incoming `video_id` and `poster_url` against the stored row, and keeps `poster_source` when the incoming poster is null |
 | `deleteMovie` | `DELETE FROM subtitles WHERE movie_id = ?` + `DELETE FROM movies WHERE id = ?` | removes the row (and its subtitles) from search entirely | two statements, one method |
+| `updateMovieMode` | `UPDATE movies SET library_mode, updated_at` | none | moves a catalog record between libraries while preserving its source path |
 | `updateMovieLocation` | `UPDATE movies SET source_path, folder_path, library_mode, updated_at` | `source_path` | `folder_path` and `library_mode` are filters, not searched text |
 | `updateMoviePoster` | `UPDATE movies SET poster_url, poster_source, updated_at` | none | posters are deliberately invisible to the search clause; `poster_source` carries the specific web source (`javdatabase`/`javbus`/`imdb`/`tmdb`, legacy `web`, or `local`) so the UI can attribute each cover |
 | `updateMovieVideoId` | `UPDATE movies SET video_id, updated_at` | `video_id` | metadataService's ID-correction path |
 
-That is the complete set: five methods, one insert, three updates, one
+That is the complete set: six methods, one insert, four updates, one
 delete-pair. The remaining `UPDATE`/`DELETE` statements in database.ts touch
 other tables (`subtitles`, `settings`, `actress_*`) and are out of this
 table's scope — the lint keys on `movies`-table statements specifically.
@@ -82,3 +83,5 @@ rule 1 of the ABI dance, proving the binding *works*, not that the app uses
 the feature). The app itself never creates an FTS table. If a real
 full-text stack ever lands here, this document is where its write-path table
 goes — and the lint's class 4 is the pattern for policing it.
+
+Library mode switch: `listMovies`, `countMovies` and `countMoviesByMode` accept an optional `mode` of `normal` or `gentle`. They add `library_mode = 'normal'` or `library_mode = 'gentle'` before pagination. The independent Gentle lock still applies, so requesting locked Gentle returns no rows. Counts use the same mode filter.

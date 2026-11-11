@@ -92,14 +92,20 @@ export function useMediaActions({
 
   async function handleAddSubtitleDir(): Promise<void> {
     if (!desktopApi) return;
-    const next = await desktopApi.addSubtitleDir();
-    setAppState(next);
+    try {
+      setAppState(await desktopApi.addSubtitleDir());
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not add the subtitle directory.");
+    }
   }
 
   async function handleRemoveSubtitleDir(dir: string): Promise<void> {
     if (!desktopApi) return;
-    const next = await desktopApi.removeSubtitleDir(dir);
-    setAppState(next);
+    try {
+      setAppState(await desktopApi.removeSubtitleDir(dir));
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not remove the subtitle directory.");
+    }
   }
 
   async function handleRunSubtitleScan(): Promise<void> {
@@ -116,8 +122,11 @@ export function useMediaActions({
           setAllMoviesPool(allMovies);
         } catch { /* not critical */ }
       }
-    } catch { /* ignore */ }
-    setSubtitleScanRunning(false);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not scan subtitle directories.");
+    } finally {
+      setSubtitleScanRunning(false);
+    }
   }
 
   async function handleSavePlayerSettings(): Promise<void> {

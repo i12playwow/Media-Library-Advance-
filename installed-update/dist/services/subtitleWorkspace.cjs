@@ -130,10 +130,12 @@ class SubtitleWorkspace {
     } finally { this.downloads.delete(key); }
   }
 }
-function registerSubtitleWorkspace({ ipcMain, getDatabase, getWindow, isGentleUnlocked }) {
+function registerSubtitleWorkspace({ ipcMain, getDatabase, getWindow, getPlayerWindow, isGentleUnlocked }) {
   const workspace = new SubtitleWorkspace(getDatabase());
   for (const method of ['state', 'search', 'local', 'download']) ipcMain.handle(`subtitle-workspace:${method}`, (event, id, ...args) => {
-    if (event.sender !== getWindow()?.webContents) throw new Error('Unavailable outside the main player.');
+    const { sender, senderFrame } = event;
+    const trustedWindow = sender === getWindow()?.webContents || sender === getPlayerWindow?.()?.webContents;
+    if (!trustedWindow || senderFrame !== sender.mainFrame) throw new Error('Unavailable outside the app player.');
     return workspace[method](id, ...args, Boolean(isGentleUnlocked()));
   });
   return workspace;

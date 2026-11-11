@@ -138,6 +138,11 @@ Gentle Mode is protected by a shortcut-based unlock flow.
 - Unlock applies to the current app session
 - Gentle Mode content stays separate from Normal Mode content
 - Gentle files are only fully accessible after unlock
+The lock is enforced in the main process, not by hiding buttons: scans skip
+Gentle roots while locked, and reads, moves, renames, removals, and duplicate
+cleanup re-check the session state. What that does and does not protect is
+documented in
+[docs/architecture.md#gentle-mode-trust-boundary](docs/architecture.md#gentle-mode-trust-boundary).
 
 ## Development
 

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.enrichMoviePoster = enrichMoviePoster;
 exports.fetchOnlineMovieMetadataByVideoId = fetchOnlineMovieMetadataByVideoId;
+exports.fetchJavDatabaseMetadata = fetchJavDatabaseMetadata;
 exports.resolveOnlineMovieMetadata = resolveOnlineMovieMetadata;
 exports.enrichActressPhotos = enrichActressPhotos;
 const promises_1 = __importDefault(require("node:fs/promises"));
@@ -335,10 +336,11 @@ async function fetchActressPhotoFromJavDatabase(name) {
     const imgMatch = html.match(/<img[^>]+class="[^"]*idol[^"]*"[^>]+src="([^"]+)"/i);
     return imgMatch?.[1] ?? null;
 }
-async function fetchJavDatabaseMetadata(videoId) {
-    const slug = videoId.toLowerCase();
+async function fetchJavDatabaseMetadata(videoId, signal) {
+    const slug = encodeURIComponent(videoId.toLowerCase());
     const response = await fetch(`https://www.javdatabase.com/movies/${slug}/`, {
-        headers: {
+        signal,
+    headers: {
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
@@ -355,6 +357,7 @@ async function fetchJavDatabaseMetadata(videoId) {
         modelName: videoId.split("-")[0] ?? null,
         posterUrl: posterMatch?.[1] ?? null,
         source: "javdatabase",
+    pageTitle: titleMatch?.[1],
         videoId
     };
 }

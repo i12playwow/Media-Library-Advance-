@@ -1,3 +1,4 @@
+import { LibraryModeSwitch } from "./LibraryModeSwitch";
 import { LibraryCounts } from "./LibraryCounts";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
@@ -72,7 +73,7 @@ export function LibraryPage({
   onPlayMovie,
 }: LibraryPageProps) {
   const [groupCopies, setGroupCopies] = useState(true);
-  const posterMovies = distinctPosterMovies(sortedMovies, groupCopies);
+  const posterMovies = distinctPosterMovies(sortedMovies.filter(movie => gentleUnlocked || movie.libraryMode !== "gentle"), groupCopies);
   const hasMoreMovies = movies.length < movieTotalCount;
   const loadMoreRef = useRef(loadMoreMovies);
   loadMoreRef.current = loadMoreMovies;
@@ -100,7 +101,7 @@ export function LibraryPage({
     if (!hasMoreMovies || loadError || !bar || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting) || loadingMoreRef.current) return;
+        if (!entries.some((entry) => entry.isIntersecting && entry.target.isConnected) || loadingMoreRef.current) return;
         loadingMoreRef.current = true;
         void loadMoreRef.current().finally(() => {
           loadingMoreRef.current = false;
@@ -125,9 +126,9 @@ export function LibraryPage({
               )}
             </h3>
           </div>
-          <div className="inline-actions">
+          <LibraryModeSwitch gentleUnlocked={gentleUnlocked}/><div className="inline-actions">
             <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
-            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Move selected video files to Recycle Bin…</button></>}
+            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Delete selected ({selectedIdSet.size})…</button></>}
             <div className="columns-control">
               <span>Sort</span>
               <select
@@ -207,17 +208,19 @@ export function LibraryPage({
             </button>
             <button
               className="ghost-button"
+              disabled={isScanning || selectedIdSet.size === 0}
               onClick={() => void handleBatchMove("normal")}
               type="button"
             >
-              Move selected to normal
+              Move selected to Normal…
             </button>
             <button
               className="ghost-button"
+              disabled={isScanning || selectedIdSet.size === 0 || !gentleUnlocked}
               onClick={() => void handleBatchMove("gentle")}
               type="button"
             >
-              Move selected to gentle
+              Move selected to Gentle…
             </button>
           </div>
         </div>

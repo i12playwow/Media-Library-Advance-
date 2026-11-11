@@ -186,33 +186,24 @@ function parseNfoXml(xml) {
     const studioMatch = xml.match(/<studio>([\s\S]*?)<\/studio>/);
     if (studioMatch)
         result.studio = studioMatch[1].trim();
-    const actorMatches = [...xml.matchAll(/<actor>\s*<name>([\s\S]*?)<\/name>/g)];
-    if (actorMatches.length > 0) {
-        result.actresses = actorMatches.map((m) => m[1].trim()).filter(Boolean);
-    }
+    const actresses = [...xml.matchAll(/<actor\b[^>]*>([\s\S]*?)<\/actor\s*>/gi)]
+        .map(([, actor]) => actor.match(/<name\b[^>]*>([\s\S]*?)<\/name\s*>/i)?.[1].trim() ?? "")
+        .map(name => name.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, "$1")
+        .replace(/&(amp|quot|apos|lt|gt);/g, (_, entity) => ({ amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" })[entity] ?? ""))
+        .filter(Boolean);
+    if (actresses.length)
+        result.actresses = actresses;
     return result;
 }
 /**
  * Read and parse an .nfo sidecar file for a video.
- * Looks for a file with the same stem or any .nfo in the same directory.
+ * Matches the video filename, or a shared movie.nfo for a single-video folder.
  */
 async function readNfoMetadata(videoPath) {
-    const dir = node_path_1.default.dirname(videoPath);
-    const stem = node_path_1.default.basename(videoPath, node_path_1.default.extname(videoPath)).toLowerCase();
     try {
-        const entries = await promises_1.default.readdir(dir, { withFileTypes: true });
-        // Prefer .nfo with the same stem, fall back to any .nfo in the directory
-        const nfoFiles = entries
-            .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".nfo"))
-            .sort((a, b) => {
-            const aMatch = a.name.toLowerCase().startsWith(stem) ? 0 : 1;
-            const bMatch = b.name.toLowerCase().startsWith(stem) ? 0 : 1;
-            return aMatch - bMatch;
-        });
-        if (nfoFiles.length > 0) {
-            const content = await promises_1.default.readFile(node_path_1.default.join(dir, nfoFiles[0].name), "utf8");
+        const content = await require("./nfoSidecar.cjs").readMatchingNfo(videoPath);
+        if (content)
             return parseNfoXml(content);
-        }
     }
     catch {
         // Gracefully ignore read errors

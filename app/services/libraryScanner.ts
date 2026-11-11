@@ -126,6 +126,10 @@ export async function scanLibraries(
     ...DEFAULT_SCAN_OPTIONS,
     ...options?.scanOptions
   };
+  if (scanOptions.renameOnly) Object.assign(scanOptions, {
+    moveRename: false, copyToLibrary: false, autoConvertToMp4: false,
+    autoResolveDuplicates: false, importBetterQuality: false, autoDownloadSubtitleFromSubtitleCat: false
+  });
   const metadataSettings = database.getMetadataSettings();
   const organizationSettings = database.getOrganizationSettings();
   const importHistory = require("./scanImportHistory.cjs").createScanImportHistory(database, cancelToken);
@@ -174,14 +178,14 @@ export async function scanLibraries(
         for (let offset = 0; offset < videoFiles.length; offset += 16) {
           if (cancelToken?.cancelled) break;
           const batch = videoFiles.slice(offset, offset + 16).filter((videoFile) => {
-            if (!isJavMoviePath(videoFile)) { skipped++; return false; }
+            if (!scanOptions.renameOnly && !isJavMoviePath(videoFile)) { skipped++; return false; }
             const resolved = path.resolve(videoFile);
             const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
             if (discoveredPaths.has(key)) return false;
             discoveredPaths.add(key);
             return true;
           });
-          const checks = await Promise.all(batch.map(async (file: string) => { if (await importHistory.shouldSkip(file)) { skipped++; skippedAlreadyScanned++; return false; } return true; }));
+          const checks = await Promise.all(batch.map(async (file: string) => { if (!scanOptions.renameOnly && await importHistory.shouldSkip(file)) { skipped++; skippedAlreadyScanned++; return false; } return true; }));
           const eligibleBatch = batch.filter((_, index) => checks[index]);
           candidates.push(...await Promise.all(eligibleBatch.map(async (videoFile) => ({
             mode: libraryMode,
@@ -227,10 +231,7 @@ export async function scanLibraries(
     };
   }
 
-  const processingGroups = buildProcessingGroups(
-    candidates,
-    scanOptions.importBetterQuality
-  );
+  const processingGroups = scanOptions.renameOnly ? candidates.map(candidate => [candidate]) : buildProcessingGroups(candidates, scanOptions.importBetterQuality);
 
   // Collect groups that have more than one file (duplicates) for user review
   const duplicateGroups: DuplicateGroup[] = processingGroups
@@ -298,6 +299,16 @@ export async function scanLibraries(
     }
 
     try {
+      if (scanOptions.renameOnly) {
+        const result = await withMutationLock(() => require("./renameOnlyScan.cjs").renameScanCandidate(database, candidate, {
+          organizationSettings, resolveLongPath: scanOptions.resolveLongPath, buildTargetVideoPath, readNfoMetadata,
+          findMatchingSubtitles: findMatchingSubtitleCandidates
+        }) as Promise<{ id: string; path: string } | false>);
+        if (result) { await importHistory.record(result.path, result.id); imported++; }
+        else skipped++;
+        processedFiles++;
+        return Boolean(result);
+      }
       // Online metadata, .nfo sidecar and subtitle search are independent of
       // each other, so they run concurrently — the subtitle search used to be
       // serialized behind the whole metadata scrape chain.

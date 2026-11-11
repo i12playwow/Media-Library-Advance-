@@ -37,32 +37,28 @@ export function useLibraryActions({
       setStatusMessage(error instanceof Error ? error.message : "Could not select this library mode.");
     }
   }
-  async function handleMoveOne(movieId: string, mode: LibraryMode): Promise<void> {
-    if (!desktopApi) {
-      setStatusMessage("Desktop bridge unavailable. Restart MLA+ and try again.");
-      return;
+  async function moveSelection(ids: string[], mode: LibraryMode, bulk: boolean): Promise<void> {
+    if (!desktopApi || ids.length === 0) return;
+    try {
+      const result = bulk ? await desktopApi.moveMovies(ids, mode) : await desktopApi.moveMovie(ids[0], mode);
+      if (result.cancelled) return;
+      if (bulk) {
+        const moved = new Set(result.moved);
+        setSelectedIds(current => current.filter(id => !moved.has(id)));
+      }
+      await refreshMovies(deferredSearch);
+      setStatusMessage(`${result.moved.length} moved to ${mode === "gentle" ? "Gentle" : "Normal"} · ${result.skipped} already there · ${result.failed.length} failed.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not move the selected movies.");
     }
-    setStatusMessage(`Moving title into ${mode} library...`);
-    await desktopApi.moveMovie(movieId, mode);
-    await refreshMovies(deferredSearch);
-    setStatusMessage(`Movie moved into ${mode} library.`);
   }
 
-  async function handleBatchMove(mode: LibraryMode): Promise<void> {
-    if (!desktopApi) {
-      setStatusMessage("Desktop bridge unavailable. Restart MLA+ and try again.");
-      return;
-    }
-    if (selectedIds.length === 0) {
-      setStatusMessage("Select at least one movie before running a batch move.");
-      return;
-    }
-    const moveCount = selectedIds.length;
-    setStatusMessage(`Moving ${moveCount} movies into ${mode} library...`);
-    await desktopApi.moveMovies(selectedIds, mode);
-    setSelectedIds([]);
-    await refreshMovies(deferredSearch);
-    setStatusMessage(`Batch move complete for ${moveCount} titles.`);
+  function handleMoveOne(movieId: string, mode: LibraryMode): Promise<void> {
+    return moveSelection([movieId], mode, false);
+  }
+
+  function handleBatchMove(mode: LibraryMode): Promise<void> {
+    return moveSelection(selectedIds, mode, true);
   }
 
   function selectMissingPosterTitles(): void {

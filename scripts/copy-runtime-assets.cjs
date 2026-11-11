@@ -12,7 +12,7 @@ for (const entry of fs.readdirSync(serviceSource, { withFileTypes: true })) {
     copied++;
   }
 }
-for (const folder of ['device-share', 'subtitle-workspace']) {
+for (const folder of ['device-share', 'subtitle-workspace', 'panel-layout', 'browse-memory', 'browse-toolbar', 'in-app-browser']) {
   fs.cpSync(path.join(root, 'app', 'renderer', folder), path.join(root, 'dist', 'renderer', folder), { recursive: true });
 }
 console.log(`Copied ${copied} runtime services and renderer support assets.`);

@@ -209,6 +209,7 @@ export class DatabaseClient {
 
   listMovies(options?: {
     includeGentle?: boolean;
+    mode?: LibraryMode;
     query?: string;
     limit?: number;
     offset?: number;
@@ -217,6 +218,9 @@ export class DatabaseClient {
     const params: (string | number)[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
+    if (options?.mode === "normal") clauses.push("library_mode = 'normal'");
+    if (options?.mode === "gentle") clauses.push("library_mode = 'gentle'");
+
     if (!includeGentle) {
       clauses.push("library_mode = 'normal'");
     }
@@ -263,11 +267,14 @@ export class DatabaseClient {
     );
   }
 
-  countMovies(options?: { includeGentle?: boolean; query?: string }): number {
+  countMovies(options?: { includeGentle?: boolean; mode?: LibraryMode; query?: string }): number {
     const clauses: string[] = [];
     const params: string[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
+    if (options?.mode === "normal") clauses.push("library_mode = 'normal'");
+    if (options?.mode === "gentle") clauses.push("library_mode = 'gentle'");
+
 
     if (!includeGentle) {
       clauses.push("library_mode = 'normal'");
@@ -293,11 +300,14 @@ export class DatabaseClient {
 
   // Same filter family as countMovies, but one scan reports the whole
   // total/normal/gentle split — the sidebar snapshot's full-library numbers.
-  countMoviesByMode(options?: { includeGentle?: boolean; query?: string }): MovieModeCounts {
+  countMoviesByMode(options?: { includeGentle?: boolean; mode?: LibraryMode; query?: string }): MovieModeCounts {
     const clauses: string[] = [];
     const params: string[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
+    if (options?.mode === "normal") clauses.push("library_mode = 'normal'");
+    if (options?.mode === "gentle") clauses.push("library_mode = 'gentle'");
+
 
     if (!includeGentle) {
       clauses.push("library_mode = 'normal'");
@@ -430,9 +440,22 @@ export class DatabaseClient {
     transaction();
   }
 
+  updateMovieAndSubtitles(movie: MovieInput, subtitles: SubtitleRecord[]): void {
+    const transaction = this.db.transaction(() => {
+      this.upsertMovie(movie);
+      this.replaceSubtitles(movie.id, subtitles);
+    });
+
+    transaction();
+  }
+
   deleteMovie(id: string): void {
     this.db.prepare("DELETE FROM subtitles WHERE movie_id = ?").run(id);
     this.db.prepare("DELETE FROM movies WHERE id = ?").run(id);
+  }
+
+  updateMovieMode(id: string, mode: LibraryMode): void {
+    this.db.prepare("UPDATE movies SET library_mode = ?, updated_at = ? WHERE id = ?").run(mode, new Date().toISOString(), id);
   }
 
   updateMovieLocation(id: string, input: UpdateMovieLocationInput): void {

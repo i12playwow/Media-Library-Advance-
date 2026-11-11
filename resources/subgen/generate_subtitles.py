@@ -332,7 +332,11 @@ def handle_download_model(args: argparse.Namespace) -> int:
     os.makedirs(model_dir, exist_ok=True)
 
     try:
-        info = api.model_info(repo_id, files_metadata=True)
+        emit_progress({"model": args.model, "stage": "starting", "fileName": None,
+                       "filesCompleted": 0, "totalFiles": 0, "downloadedBytes": 0,
+                       "totalBytes": None, "percent": 0,
+                       "message": "Connecting to the model download server..."})
+        info = api.model_info(repo_id, files_metadata=True, timeout=30)
         repo_files: list[dict[str, Any]] = []
         for sibling in info.siblings or []:
             file_name = getattr(sibling, "rfilename", None)

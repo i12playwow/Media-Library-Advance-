@@ -19,6 +19,11 @@ interface ContextMenuProps {
   onCopyPath: () => void;
   onRemoveLibrary?: () => void;
   onTrashFile?: () => void;
+  onRenameFile?: () => void;
+  onAutoRename?: () => void;
+  onRenameAndMove?: () => void;
+  onTrashSelection?: () => void;
+  selectedCount?: number;
   onCopyVideoId?: () => void;
 }
 
@@ -35,6 +40,11 @@ export function ContextMenu({
   onCopyPath,
   onRemoveLibrary,
   onTrashFile,
+  onRenameFile,
+  onAutoRename,
+  onRenameAndMove,
+  onTrashSelection,
+  selectedCount,
   onCopyVideoId,
 }: ContextMenuProps) {
   const { movie, x, y } = contextMenu;
@@ -46,8 +56,12 @@ export function ContextMenu({
     >
       <ul
         className="ctx-menu"
+        ref={(menu) => {
+          if (!menu) return;
+          menu.style.left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8)) + "px";
+          menu.style.top = Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8)) + "px";
+        }}
         onClick={(e) => e.stopPropagation()}
-        style={{ left: x, top: y }}
       >
         <li className="ctx-header">
           <span className="ctx-eyebrow">Movie</span>
@@ -81,7 +95,7 @@ export function ContextMenu({
         <li className="ctx-sep" />
         <li>
           <button className="ctx-item" onClick={onMove} type="button">
-            Move to {movie.libraryMode === "normal" ? "Gentle Mode" : "Normal Mode"}
+            Move to {movie.libraryMode === "normal" ? "Gentle Mode" : "Normal Mode"}…
           </button>
         </li>
         <li className="ctx-sep" />
@@ -103,8 +117,12 @@ export function ContextMenu({
             </button>
           </li>
         )}
+        {onAutoRename && <li><button className="ctx-item" type="button" onClick={onAutoRename}>Auto-rename from JAVDatabase…</button></li>}
+        {onRenameFile && <li><button className="ctx-item" type="button" onClick={onRenameFile}>Rename video file…</button></li>}
+        {onRenameAndMove && <li><button className="ctx-item" type="button" onClick={onRenameAndMove}>Rename and move video…</button></li>}
         {onRemoveLibrary && <li><button className="ctx-item" type="button" onClick={onRemoveLibrary}>Remove from library…</button></li>}
-        {onTrashFile && <li><button className="ctx-item" type="button" onClick={onTrashFile}>Move video file to Recycle Bin…</button></li>}
+        {onTrashFile && <li><button className="ctx-item" type="button" onClick={onTrashFile}>Delete video file…</button></li>}
+        {onTrashSelection && <li><button className="ctx-item" type="button" onClick={onTrashSelection}>Delete {selectedCount} selected video files…</button></li>}
       </ul>
     </div>
   );

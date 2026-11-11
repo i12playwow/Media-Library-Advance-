@@ -15,7 +15,7 @@ describe("in-place duplicate protection", () => {
       const state = { roots: { normal: ["media"], gentle: [] }, gentleUnlocked: false };
       const api = { scanLibraries: vi.fn().mockResolvedValue(summary),
         pickScanFolder: vi.fn().mockResolvedValue(summary),
-        resolveDuplicate: vi.fn().mockResolvedValue({ blocked: 0 }), getAppState: vi.fn().mockResolvedValue(state) };
+        resolveDuplicate: vi.fn().mockResolvedValue({ deleted: 0, blocked: 0, failed: [] }), getAppState: vi.fn().mockResolvedValue(state) };
       const props = { desktopApi: api, appState: state, isScanning: false,
         scanOptionsDraft: { ...DEFAULT_SCAN_OPTIONS, moveRename: false, autoResolveDuplicates: cleanup },
         deferredSearch: "", refreshMovies: vi.fn().mockResolvedValue(undefined),
@@ -25,7 +25,7 @@ describe("in-place duplicate protection", () => {
       const { result } = renderHook(() => useScanHandlers(props as unknown as Parameters<typeof useScanHandlers>[0]));
       await act(async () => { await result.current[action](); });
       if (cleanup) {
-        expect(api.resolveDuplicate).toHaveBeenCalledExactlyOnceWith("a.mp4", ["b.mp4"], false);
+        expect(api.resolveDuplicate).toHaveBeenCalledExactlyOnceWith("a.mp4", ["b.mp4"]);
         expect(props.setDuplicateGroups).not.toHaveBeenCalled();
       } else {
         expect(api.resolveDuplicate).not.toHaveBeenCalled();

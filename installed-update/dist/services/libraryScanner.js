@@ -851,6 +851,7 @@ async function getFileSize(filePath) {
         return 0;
     }
 }
+exports.extractSubtitleLanguage = extractSubtitleLanguage;
 function extractSubtitleLanguage(filename) {
     const stem = node_path_1.default.basename(filename, node_path_1.default.extname(filename));
     const segments = stem.split(".");

@@ -1,4 +1,4 @@
-import { useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 interface UseSidebarResizeReturn {
   sidebarCollapsed: boolean;
@@ -9,7 +9,8 @@ interface UseSidebarResizeReturn {
 
 export function useSidebarResize(): UseSidebarResizeReturn {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(() => { try { const saved = Number(localStorage.getItem("mla-sidebar-width")); return saved >= 180 && saved <= 560 ? saved : 320; } catch { return 320; } });
+  useEffect(() => { try { localStorage.setItem("mla-sidebar-width", String(sidebarWidth)); } catch {} }, [sidebarWidth]);
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   function handleSidebarDragStart(event: React.MouseEvent) {

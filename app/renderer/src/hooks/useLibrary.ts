@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPage, LibraryMode, MovieModeCounts, MovieRecord } from "../../../shared/contracts";
-import { deriveRegionLabel, deriveStudioName, deriveTagLabel, inferActressFromPath } from "../utils";
+import { deriveRegionLabel, deriveStudioName, deriveTagLabel } from "../utils";
 
 const PAGE_SIZE = 200;
 
@@ -68,6 +68,17 @@ export function useLibrary({
   const deferredSearchRef = useRef(deferredSearch);
   deferredSearchRef.current = deferredSearch;
 
+  const libraryRequest = useRef(0);
+  const libraryLoading = useRef(false);
+  const libraryAppending = useRef(false);
+  const libraryOffset = useRef(0);
+  useEffect(() => {
+    const change = () => { libraryRequest.current++; setMovieTotalCount(0); setMovieLoadOffset(0); setMovies([]); setSelectedMovieId(null); void refreshMovies(deferredSearchRef.current); };
+    window.addEventListener('mla-library-mode',change);
+    return () => window.removeEventListener('mla-library-mode',change);
+  },[desktopApi]);
+  useEffect(() => { if (!gentleUnlocked && desktopApi?.getLibraryViewMode?.() === 'gentle') {desktopApi.setLibraryViewMode('normal');window.dispatchEvent(new CustomEvent('mla-library-mode',{detail:'normal'}));} },[desktopApi,gentleUnlocked]);
+
   const sortedMovies = useMemo(
     () =>
       [...movies].sort((a, b) => {
@@ -106,10 +117,10 @@ export function useLibrary({
         ? pool
         : pool.filter((m) => m.libraryMode === actressModeFilter);
     type ActressAggregate = {
+      name: string;
       count: number;
       posterUrl: string | null;
       movieIds: string[];
-      inferred: boolean;
       modes: Set<LibraryMode>;
       studios: Map<string, number>;
       tags: Map<string, number>;
@@ -128,20 +139,22 @@ export function useLibrary({
       return winner;
     }
     for (const movie of filtered) {
-      const actresses =
-        movie.actresses.length > 0
-          ? movie.actresses
-          : (() => {
-              const inferred = inferActressFromPath(movie.sourcePath);
-              return inferred ? [inferred] : [];
-            })();
-      const inferred = movie.actresses.length === 0;
-      for (const actress of actresses) {
-        const entry: ActressAggregate = data.get(actress) ?? {
+      const actresses = new Map<string, string>();
+      for (const rawName of movie.actresses) {
+        const name = rawName.trim().replace(/\s+/g, " ");
+        const key = name.normalize("NFKC").toLowerCase();
+        if (!key || /^(?:unknown(?: (?:actress|actor|cast))?|unknow|n\/a|none|uncredited|(?:test )?fixtures?|[-–—])$/.test(key)) continue;
+        // Catalog codes and release names can appear in older cast metadata.
+        if (/^[a-z]{2,12}[-_]\d{2,8}(?:[-_ .].*)?$/.test(key)) continue;
+        if (!actresses.has(key)) actresses.set(key, name);
+      }
+      if (!actresses.size) actresses.set("unknown", "Unknown");
+      for (const [key, actress] of actresses) {
+        const entry: ActressAggregate = data.get(key) ?? {
+          name: actress,
           count: 0,
           posterUrl: null,
           movieIds: [],
-          inferred,
           modes: new Set<LibraryMode>(),
           studios: new Map<string, number>(),
           tags: new Map<string, number>(),
@@ -156,24 +169,21 @@ export function useLibrary({
         entry.tags.set(tag, (entry.tags.get(tag) ?? 0) + 1);
         const region = deriveRegionLabel(movie);
         entry.regions.set(region, (entry.regions.get(region) ?? 0) + 1);
-        const dedicatedPhoto = actressPhotos[actress] ?? null;
-        if (!entry.posterUrl) {
-          entry.posterUrl = dedicatedPhoto ?? movie.posterUrl ?? null;
-        } else if (dedicatedPhoto) {
-          entry.posterUrl = dedicatedPhoto;
+        if (key !== "unknown") {
+          const dedicatedPhoto = actressPhotos[entry.name] ?? actressPhotos[actress];
+          entry.posterUrl = dedicatedPhoto ?? entry.posterUrl ?? movie.posterUrl ?? null;
         }
-        data.set(actress, entry);
+        data.set(key, entry);
       }
     }
-    return Array.from(data.entries())
-      .map(([name, info]) => ({
-        name,
+    return Array.from(data.values())
+      .map(info => ({
+        name: info.name,
         count: info.count,
-        posterUrl: actressPhotos[name] ?? info.posterUrl,
+        posterUrl: info.posterUrl,
         movieIds: info.movieIds,
-        inferred: info.inferred,
         modes: Array.from(info.modes) as LibraryMode[],
-        region: actressRegions[name] ?? getDominantLabel(info.regions),
+        region: info.name === "Unknown" ? "Unknown" : actressRegions[info.name] ?? getDominantLabel(info.regions),
         studio: getDominantLabel(info.studios),
         tag: getDominantLabel(info.tags),
       }))
@@ -228,7 +238,12 @@ export function useLibrary({
   async function refreshMovies(query?: string, append = false): Promise<void> {
     if (!desktopApi) return;
 
-    const offset = append ? movieLoadOffset : 0;
+    if (append && (libraryLoading.current || libraryAppending.current)) return;
+    const request = append ? libraryRequest.current : ++libraryRequest.current;
+    if (append) libraryAppending.current = true; else {libraryLoading.current = true; libraryOffset.current = 0;}
+    const viewMode = desktopApi.getLibraryViewMode?.() ?? 'all';
+    const offset = append ? libraryOffset.current : 0;
+    try {
     const [nextMovies, modeCounts] = await Promise.all([
       desktopApi.listMovies(query, PAGE_SIZE, offset),
       append ? Promise.resolve(null) : desktopApi.countMoviesByMode(query),
@@ -238,7 +253,7 @@ export function useLibrary({
       setMovies((prev) => distinctPosterMovies(append ? [...prev, ...nextMovies] : nextMovies, false));
       if (!append) {
         if (modeCounts) {
-          setMovieTotalCount(modeCounts.total);
+          setMovieTotalCount(viewMode === "all" ? modeCounts.total : modeCounts[viewMode]);
           setMovieModeCounts(modeCounts);
         }
         setMovieLoadOffset(nextMovies.length);
@@ -248,13 +263,14 @@ export function useLibrary({
       if (!selectedMovieIdRef.current && nextMovies.length > 0) {
         setSelectedMovieId(nextMovies[0].id);
       }
-      if (!append && nextMovies.length === 0 && !isScanningRef.current) {
+      if (!append && nextMovies.length === 0 && !isScanningRef.current && viewMode === "all") {
         const libraryPages = new Set(["library", "search"]);
         setActivePage((current) =>
           libraryPages.has(current) ? "home" : current
         );
       }
     });
+    } finally {if(request===libraryRequest.current){libraryLoading.current=false;libraryAppending.current=false;}}
   }
 
   async function loadMoreMovies(): Promise<void> {

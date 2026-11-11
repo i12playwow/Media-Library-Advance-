@@ -12,6 +12,7 @@ interface AppTopBarProps {
   isScanning: boolean;
   onOpenScanOptions: (mode: LibraryMode) => void;
   onCancelScan: () => void;
+  onOpenBrowser?: () => void;
   gentleUnlocked: boolean;
   scanProgress: ScanProgress | null;
   scanStageLabel: string;
@@ -25,6 +26,7 @@ export function AppTopBar({
   isScanning,
   onOpenScanOptions,
   onCancelScan,
+  onOpenBrowser,
   gentleUnlocked,
   scanProgress,
   scanStageLabel,
@@ -53,6 +55,7 @@ export function AppTopBar({
           >
             {isScanning ? "Scanning..." : "Scan library"}
           </button>
+          {onOpenBrowser && <button className="ghost-button" onClick={onOpenBrowser} type="button">Browser</button>}
           {isScanning ? (
             <button
               className="scan-stop-btn"

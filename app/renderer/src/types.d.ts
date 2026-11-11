@@ -1,3 +1,4 @@
+import type { ActressMetadataRescanSummary, LibraryMoveResult } from "../../shared/contracts";
 import type {
   AppShellState,
   ConvertVideoResult,
@@ -34,6 +35,7 @@ declare global {
       getThemeMode: () => Promise<"dark" | "light">;
       setThemeMode: (themeMode: "dark" | "light") => Promise<AppShellState>;
       getAppState: () => Promise<AppShellState>;
+      openBrowser?: () => Promise<void>;
       getGuardsChainState: () => Promise<GuardsChainState>;
       listGuardsChainSegments: () => Promise<GuardsChainSegmentsResult>;
       saveMetadataSettings: (settings: MetadataSettings) => Promise<AppShellState>;
@@ -42,10 +44,13 @@ declare global {
       openFile: (filePath: string) => Promise<void>;
       showInFolder: (filePath: string) => Promise<void>;
       pickScanFolder: (options: ScanAutomationOptions) => Promise<ScanSummary>;
+      getLibraryViewMode: () => "all" | "normal" | "gentle";
+      setLibraryViewMode: (mode: "normal" | "gentle") => void;
       listMovies: (query?: string, limit?: number, offset?: number) => Promise<MovieRecord[]>;
       countMovies: (query?: string) => Promise<number>;
       countMoviesByMode: (query?: string) => Promise<MovieModeCounts>;
       linkActressMovies: (name: string, ids: string[]) => Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }>;
+      rescanActressMetadata?: () => Promise<ActressMetadataRescanSummary>;
       librarySummary: () => Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }>;
       scanWholeSystem: (options: ScanAutomationOptions) => Promise<ScanSummary>;
       selectMovieModeIds: (mode: LibraryMode) => Promise<string[]>;
@@ -57,8 +62,9 @@ declare global {
       scanLibraries: (options?: ScanAutomationOptions) => Promise<ScanSummary>;
       cancelScan: () => Promise<void>;
       addLibraryRoot: (mode: LibraryMode) => Promise<AppShellState>;
-      moveMovie: (movieId: string, mode: LibraryMode) => Promise<MovieRecord>;
-      moveMovies: (movieIds: string[], mode: LibraryMode) => Promise<MovieRecord[]>;
+      renameMovieFile: (id: string, action: "rename" | "move" | "javdatabase") => Promise<{ changed: boolean; fileName?: string }>;
+      moveMovie: (movieId: string, mode: LibraryMode) => Promise<LibraryMoveResult>;
+      moveMovies: (movieIds: string[], mode: LibraryMode) => Promise<LibraryMoveResult>;
       unlockGentle: (pin: string) => Promise<{ ok: boolean; message: string }>;
       toggleGentle: () => Promise<AppShellState>;
       getActressPhotos: () => Promise<Record<string, string>>;
@@ -73,6 +79,9 @@ declare global {
       playerFetchSubtitles: (dvdId: string) => Promise<OnlineSubtitleResult[]>;
       playerDownloadSubtitle: (url: string) => Promise<string | null>;
       playerInstallSubtitle: (movieId: string, language: string, content: string) => Promise<string>;
+      openPlayerWindow: (id?: string | null) => Promise<{ok:boolean}>;
+      getPlayerWindowMovie: () => Promise<MovieRecord | null>;
+      onPlayerWindowMovie: (callback: (movie: MovieRecord | null) => void) => () => void;
       playerGetSettings: () => Promise<PlayerSettings>;
       playerSaveSettings: (settings: PlayerSettings) => Promise<PlayerSettings>;
       playerGetPlaybackCheckpoint: (movieId: string) => Promise<PlaybackCheckpoint | null>;
@@ -82,7 +91,7 @@ declare global {
       playerConvertToMp4: (filePath: string) => Promise<ConvertVideoResult>;
       onScanProgress: (handler: (progress: ScanProgress) => void) => () => void;
       onGentleUnlockResult: (handler: (result: { ok: boolean; message: string }) => void) => () => void;
-      resolveDuplicate: (keepPath: string, deletePaths: string[], gentleUnlocked?: boolean) => Promise<{ deleted: number; blocked: number }>;
+      resolveDuplicate: (keepPath: string, deletePaths: string[]) => Promise<{ deleted: number; blocked: number; failed: Array<{ path: string; error: string }> }>;
       addSubtitleDir: () => Promise<AppShellState>;
       removeSubtitleDir: (dir: string) => Promise<AppShellState>;
       scanSubtitleDirs: () => Promise<SubtitleScanResult>;

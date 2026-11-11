@@ -82,10 +82,30 @@ export function buildLibraryTargetDirectory(
   if (firstActress) {
     const sanitized = firstActress.replace(/[\\/:*?"<>|]/g, "-").trim();
     const actressSegment = sanitized || "Unknown Actress";
-    return path.join(root, actressSegment, ...segments);
+    return assertPathWithinRoot(
+      root,
+      path.join(root, actressSegment, ...segments)
+    );
   }
 
-  return path.join(root, ...segments);
+  return assertPathWithinRoot(root, path.join(root, ...segments));
+}
+
+export function assertPathWithinRoot(root: string, candidate: string): string {
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.resolve(candidate);
+  const relativePath = path.relative(resolvedRoot, resolvedCandidate);
+
+  if (
+    !relativePath ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error("Generated library path must be inside the selected library root.");
+  }
+
+  return resolvedCandidate;
 }
 
 export function buildTargetVideoPath(
@@ -154,6 +174,11 @@ export async function ensureLibraryTargetDirectory(
 ): Promise<string> {
   const directory = buildLibraryTargetDirectory(root, params);
   await fs.mkdir(directory, { recursive: true });
+  const [resolvedRoot, resolvedDirectory] = await Promise.all([
+    fs.realpath(root),
+    fs.realpath(directory)
+  ]);
+  assertPathWithinRoot(resolvedRoot, resolvedDirectory);
   return directory;
 }
 
@@ -277,37 +302,24 @@ export function parseNfoXml(xml: string): {
   const studioMatch = xml.match(/<studio>([\s\S]*?)<\/studio>/);
   if (studioMatch) result.studio = studioMatch[1].trim();
 
-  const actorMatches = [...xml.matchAll(/<actor>\s*<name>([\s\S]*?)<\/name>/g)];
-  if (actorMatches.length > 0) {
-    result.actresses = actorMatches.map((m) => m[1].trim()).filter(Boolean);
-  }
+  const actresses = [...xml.matchAll(/<actor\b[^>]*>([\s\S]*?)<\/actor\s*>/gi)]
+    .map(([, actor]) => actor.match(/<name\b[^>]*>([\s\S]*?)<\/name\s*>/i)?.[1].trim() ?? "")
+    .map(name => name.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, "$1")
+      .replace(/&(amp|quot|apos|lt|gt);/g, (_, entity: string) => ({ amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" })[entity] ?? ""))
+    .filter(Boolean);
+  if (actresses.length) result.actresses = actresses;
 
   return result;
 }
 
 /**
  * Read and parse an .nfo sidecar file for a video.
- * Looks for a file with the same stem or any .nfo in the same directory.
+ * Matches the video filename, or a shared movie.nfo for a single-video folder.
  */
 export async function readNfoMetadata(videoPath: string): Promise<ReturnType<typeof parseNfoXml>> {
-  const dir = path.dirname(videoPath);
-  const stem = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
-
   try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    // Prefer .nfo with the same stem, fall back to any .nfo in the directory
-    const nfoFiles = entries
-      .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".nfo"))
-      .sort((a, b) => {
-        const aMatch = a.name.toLowerCase().startsWith(stem) ? 0 : 1;
-        const bMatch = b.name.toLowerCase().startsWith(stem) ? 0 : 1;
-        return aMatch - bMatch;
-      });
-
-    if (nfoFiles.length > 0) {
-      const content = await fs.readFile(path.join(dir, nfoFiles[0].name), "utf8");
-      return parseNfoXml(content);
-    }
+    const content = await require("./nfoSidecar.cjs").readMatchingNfo(videoPath);
+    if (content) return parseNfoXml(content);
   } catch {
     // Gracefully ignore read errors
   }

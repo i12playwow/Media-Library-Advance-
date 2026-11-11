@@ -7,7 +7,6 @@ exports.moveMovieToMode = moveMovieToMode;
 exports.moveFile = moveFile;
 const promises_1 = __importDefault(require("node:fs/promises"));
 const node_path_1 = __importDefault(require("node:path"));
-const metadataService_1 = require("./metadataService");
 const libraryLayout_1 = require("./libraryLayout");
 const videoId_1 = require("../shared/videoId");
 function normalizeRootList(value) {
@@ -24,26 +23,21 @@ async function moveMovieToMode(database, movieId, targetMode, options) {
     }
     const roots = database.getRoots();
     const organizationSettings = database.getOrganizationSettings();
-    const targetRoot = normalizeRootList(roots[targetMode])[0];
+    const storageFolder = targetMode === "gentle" ? organizationSettings.gentleLibraryPath : organizationSettings.normalLibraryPath;
+  const targetRoot = storageFolder?.trim() || normalizeRootList(roots[targetMode])[0];
     if (!targetRoot) {
-        throw new Error(`No ${targetMode} library root is configured yet. Add one in the Library page first.`);
+        throw new Error(`Choose a storage folder for the ${targetMode} library in Settings before moving files.`);
     }
     const resolvedVideoId = movie.videoId ??
         (0, videoId_1.extractVideoId)(node_path_1.default.basename(movie.sourcePath, node_path_1.default.extname(movie.sourcePath)));
-    const onlineMetadata = await (0, metadataService_1.resolveOnlineMovieMetadata)({
-        title: movie.title,
-        year: movie.year,
-        videoId: resolvedVideoId,
-        sourcePath: movie.sourcePath
-    }, database.getMetadataSettings()).catch(() => null);
-    const actresses = onlineMetadata?.actresses.length ? onlineMetadata.actresses : movie.actresses;
-    const targetDirectory = await (0, libraryLayout_1.ensureLibraryTargetDirectory)(targetRoot, {
+    const actresses = movie.actresses;
+  const targetDirectory = await (0, libraryLayout_1.ensureLibraryTargetDirectory)(targetRoot, {
         libraryMode: targetMode,
         title: movie.title,
         year: movie.year,
         videoId: resolvedVideoId,
         actresses,
-        modelName: onlineMetadata?.modelName ?? null,
+        modelName: null,
         resolveLongPath: true,
         organizationSettings
     });
@@ -53,7 +47,7 @@ async function moveMovieToMode(database, movieId, targetMode, options) {
         year: movie.year,
         videoId: resolvedVideoId,
         actresses,
-        modelName: onlineMetadata?.modelName ?? null,
+        modelName: null,
         resolveLongPath: true,
         organizationSettings
     }, node_path_1.default.extname(movie.sourcePath)));
@@ -82,7 +76,7 @@ async function moveMovieToMode(database, movieId, targetMode, options) {
                 year: movie.year,
                 videoId: resolvedVideoId,
                 actresses,
-                modelName: onlineMetadata?.modelName ?? null,
+                modelName: null,
                 language: subtitle.language,
                 extension: node_path_1.default.extname(subtitle.path),
                 subtitleCount: movie.subtitles.length,
@@ -140,10 +134,10 @@ async function moveMovieToMode(database, movieId, targetMode, options) {
         year: movie.year,
         videoId: resolvedVideoId,
         actresses,
-        modelName: onlineMetadata?.modelName ?? null,
+        modelName: null,
         sourcePath: targetVideoPath,
         organizationSettings
-    });
+    }).catch(() => undefined);
     database.upsertMovie({
         id: movie.id,
         title: movie.title,
@@ -153,13 +147,13 @@ async function moveMovieToMode(database, movieId, targetMode, options) {
         folderPath: targetDirectory,
         libraryMode: targetMode,
         resolution: movie.resolution,
-        posterUrl: onlineMetadata?.posterUrl ?? movie.posterUrl,
-        posterSource: onlineMetadata?.posterUrl ? "web" : movie.posterSource,
+        posterUrl: movie.posterUrl,
+        posterSource: movie.posterSource,
         actresses,
         keywords: movie.keywords
     });
     database.replaceSubtitles(movie.id, movedSubtitles.map((entry) => entry.record));
-    await cleanupDirectory(node_path_1.default.dirname(movie.sourcePath));
+    await cleanupDirectory(node_path_1.default.dirname(movie.sourcePath)).catch(() => undefined);
     return database.getMovie(movie.id) ?? {
         ...movie,
         sourcePath: targetVideoPath,
@@ -228,16 +222,8 @@ async function moveFile(sourcePath, targetPath) {
     }
 }
 async function cleanupDirectory(directory) {
-    if (!(await exists(directory))) {
-        return;
-    }
-    // readdir returns only user-visible names; use readdirSync equiv that includes hidden
-    const remaining = await promises_1.default.readdir(directory);
-    // Filter out Windows thumb/desktop.ini artifacts before deciding to remove
-    const real = remaining.filter((f) => f !== "Thumbs.db" && f !== "desktop.ini" && f !== ".DS_Store");
-    if (real.length === 0) {
-        await promises_1.default.rm(directory, { recursive: true, force: true }).catch(() => undefined);
-    }
+    // Let the filesystem verify emptiness at deletion time.
+    await promises_1.default.rmdir(directory);
 }
 async function exists(candidate) {
     try {

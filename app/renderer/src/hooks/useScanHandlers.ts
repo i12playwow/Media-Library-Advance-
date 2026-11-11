@@ -46,18 +46,21 @@ export function useScanHandlers({
   const [scanSourceMode, setScanSourceMode] = useState<"saved" | "folder" | "system">("folder");
 
   async function autoResolveDuplicateGroups(
-    groups: DuplicateGroup[],
-    gentleUnlocked: boolean
-  ): Promise<number> {
-    if (!desktopApi) return 0;
+    groups: DuplicateGroup[]
+  ): Promise<{ blocked: number; failed: number; firstError: string | null }> {
+    if (!desktopApi) return { blocked: 0, failed: 0, firstError: null };
     let blocked = 0;
+    let failed = 0;
+    let firstError: string | null = null;
     for (const g of groups) {
       const keepPath = g.files.find((f) => f.autoSelected)?.path ?? g.files[0].path;
       const deletePaths = g.files.map((f) => f.path).filter((p) => p !== keepPath);
-      const result = await desktopApi.resolveDuplicate(keepPath, deletePaths, gentleUnlocked);
+      const result = await desktopApi.resolveDuplicate(keepPath, deletePaths);
       blocked += result.blocked;
+      failed += result.failed.length;
+      firstError ??= result.failed[0]?.error ?? null;
     }
-    return blocked;
+    return { blocked, failed, firstError };
   }
 
   async function handleScanSaved(): Promise<void> {
@@ -77,13 +80,10 @@ export function useScanHandlers({
     try {
       const summary = await desktopApi.scanLibraries(scanOptionsDraft);
       setLastScanSummary(summary);
-      let autoResolveBlocked = 0;
+      let autoResolve = { blocked: 0, failed: 0, firstError: null as string | null };
       if (summary.duplicateGroups.length > 0) {
         if (scanOptionsDraft.autoResolveDuplicates) {
-          autoResolveBlocked = await autoResolveDuplicateGroups(
-            summary.duplicateGroups,
-            appState.gentleUnlocked ?? false
-          );
+          autoResolve = await autoResolveDuplicateGroups(summary.duplicateGroups);
         } else {
           const selections: Record<string, string> = {};
           for (const g of summary.duplicateGroups) selections[g.key] = g.files[0].path;
@@ -95,10 +95,13 @@ export function useScanHandlers({
       setAppState(nextState);
       initFromAppState(nextState);
       await refreshMovies(deferredSearch);
-      const blockedNote = autoResolveBlocked > 0
-        ? ` · ${autoResolveBlocked} gentle-library duplicate(s) kept on disk (unlock to delete).`
+      const blockedNote = autoResolve.blocked > 0
+        ? ` · ${autoResolve.blocked} gentle-library duplicate(s) kept on disk (unlock to delete).`
         : "";
-      setStatusMessage(buildScanStatusMessage(summary) + blockedNote);
+      const failedNote = autoResolve.failed > 0
+        ? ` · ${autoResolve.failed} duplicate(s) not deleted: ${autoResolve.firstError ?? "the file stayed on disk"}`
+        : "";
+      setStatusMessage(buildScanStatusMessage(summary) + blockedNote + failedNote);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The scan failed unexpectedly.");
     }
@@ -141,13 +144,10 @@ export function useScanHandlers({
           ? await desktopApi.scanLibraries(scanOptionsDraft)
           : await desktopApi.pickScanFolder(scanOptionsDraft);
       setLastScanSummary(summary);
-      let autoResolveBlocked = 0;
+      let autoResolve = { blocked: 0, failed: 0, firstError: null as string | null };
       if (summary.duplicateGroups.length > 0) {
         if (scanOptionsDraft.autoResolveDuplicates) {
-          autoResolveBlocked = await autoResolveDuplicateGroups(
-            summary.duplicateGroups,
-            appState?.gentleUnlocked ?? false
-          );
+          autoResolve = await autoResolveDuplicateGroups(summary.duplicateGroups);
         } else {
           const selections: Record<string, string> = {};
           for (const g of summary.duplicateGroups) selections[g.key] = g.files[0].path;
@@ -159,10 +159,13 @@ export function useScanHandlers({
       setAppState(nextState);
       initFromAppState(nextState);
       await refreshMovies(deferredSearch);
-      const blockedNote = autoResolveBlocked > 0
-        ? ` · ${autoResolveBlocked} gentle-library duplicate(s) kept on disk (unlock to delete).`
+      const blockedNote = autoResolve.blocked > 0
+        ? ` · ${autoResolve.blocked} gentle-library duplicate(s) kept on disk (unlock to delete).`
         : "";
-      setStatusMessage(buildScanStatusMessage(summary) + blockedNote);
+      const failedNote = autoResolve.failed > 0
+        ? ` · ${autoResolve.failed} duplicate(s) not deleted: ${autoResolve.firstError ?? "the file stayed on disk"}`
+        : "";
+      setStatusMessage(buildScanStatusMessage(summary) + blockedNote + failedNote);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "The scan failed unexpectedly.");
     }

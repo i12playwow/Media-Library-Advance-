@@ -1,3 +1,4 @@
+import type { ActressMetadataRescanSummary, LibraryMoveResult } from "../shared/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppShellState,
@@ -25,7 +26,13 @@ import type {
   SubtitleScanResult
 } from "../shared/contracts";
 
+let libraryViewMode: "all" | "normal" | "gentle"=new URLSearchParams(window.location.search).has('playerWindow')?'all':'normal';
 const api = {
+ getLibraryViewMode: () => libraryViewMode,
+ setLibraryViewMode: (mode: "normal" | "gentle") => {if(mode!=="normal"&&mode!=="gentle")throw Error('Choose Normal or Gentle');libraryViewMode=mode;},
+openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.invoke("player:openWindow", id),
+ getPlayerWindowMovie: (): Promise<MovieRecord | null> => ipcRenderer.invoke("player:getWindowMovie"),
+ onPlayerWindowMovie: (callback: (movie: MovieRecord | null) => void) => {const listener = (_event: unknown, movie: MovieRecord | null) => callback(movie); ipcRenderer.on("player:windowMovie",listener); return () => {ipcRenderer.removeListener("player:windowMovie",listener);};},
   getGentleShortcut: (): Promise<string> =>
     ipcRenderer.invoke("settings:getGentleShortcut"),
   setGentleShortcut: (shortcut: string): Promise<boolean> =>
@@ -40,6 +47,7 @@ const api = {
     ipcRenderer.invoke("settings:setThemeMode", themeMode),
   getAppState: (): Promise<AppShellState> =>
     ipcRenderer.invoke("app:getState"),
+  openBrowser: (): Promise<void> => ipcRenderer.invoke("app:openBrowser"),
   getGuardsChainState: (): Promise<GuardsChainState> =>
     ipcRenderer.invoke("guards:getChainState"),
   listGuardsChainSegments: (): Promise<GuardsChainSegmentsResult> =>
@@ -57,9 +65,9 @@ const api = {
   pickScanFolder: (options: ScanAutomationOptions): Promise<ScanSummary> =>
     ipcRenderer.invoke("movies:pickScan", options),
   listMovies: (query?: string, limit?: number, offset?: number): Promise<MovieRecord[]> =>
-    ipcRenderer.invoke("movies:list", { query, limit, offset }),
+    ipcRenderer.invoke("movies:list", { query, limit, offset, mode: libraryViewMode }),
   countMovies: (query?: string): Promise<number> =>
-    ipcRenderer.invoke("movies:count", { query }),
+    ipcRenderer.invoke("movies:count", { query, mode: libraryViewMode }),
   countMoviesByMode: (query?: string): Promise<MovieModeCounts> =>
     ipcRenderer.invoke("movies:modeCounts", { query }),
   ensureMoviePosters: (movieIds: string[]): Promise<PosterBackfillSummary> =>
@@ -74,9 +82,11 @@ const api = {
     ipcRenderer.invoke("scan:cancel"),
   addLibraryRoot: (mode: LibraryMode): Promise<AppShellState> =>
     ipcRenderer.invoke("library:addRoot", mode),
-  moveMovie: (movieId: string, mode: LibraryMode): Promise<MovieRecord> =>
+  renameMovieFile: (id: string, action: "rename" | "move" | "javdatabase"): Promise<{ changed: boolean; fileName?: string }> =>
+    ipcRenderer.invoke("movies:renameFile", id, action),
+  moveMovie: (movieId: string, mode: LibraryMode): Promise<LibraryMoveResult> =>
     ipcRenderer.invoke("movies:moveMode", movieId, mode),
-  moveMovies: (movieIds: string[], mode: LibraryMode): Promise<MovieRecord[]> =>
+  moveMovies: (movieIds: string[], mode: LibraryMode): Promise<LibraryMoveResult> =>
     ipcRenderer.invoke("movies:batchMoveMode", movieIds, mode),
   unlockGentle: (pin: string): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke("auth:unlockGentle", pin),
@@ -100,6 +110,7 @@ const api = {
     ipcRenderer.invoke("actress:setRegion", name, region),
   removeMovies: (ids: string[], action: "library" | "trash"): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> => ipcRenderer.invoke("movies:remove", ids, action),
   linkActressMovies: (name: string, ids: string[]): Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }> => ipcRenderer.invoke("actress:linkMovies", name, ids),
+  rescanActressMetadata: (): Promise<ActressMetadataRescanSummary> => ipcRenderer.invoke("actress:rescanMetadata"),
   librarySummary: (): Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }> => ipcRenderer.invoke("movies:summary"),
   scanWholeSystem: (options: ScanAutomationOptions): Promise<ScanSummary> => ipcRenderer.invoke("movies:scanWholeSystem", options),
   selectMovieModeIds: (mode: LibraryMode): Promise<string[]> => ipcRenderer.invoke("movies:selectModeIds", mode),
@@ -143,8 +154,8 @@ const api = {
       ipcRenderer.removeListener("gentle:unlockResult", listener);
     };
   },
-  resolveDuplicate: (keepPath: string, deletePaths: string[], gentleUnlocked?: boolean): Promise<{ deleted: number; blocked: number }> =>
-    ipcRenderer.invoke("duplicates:resolve", keepPath, deletePaths, gentleUnlocked),
+  resolveDuplicate: (keepPath: string, deletePaths: string[]): Promise<{ deleted: number; blocked: number; failed: Array<{ path: string; error: string }> }> =>
+    ipcRenderer.invoke("duplicates:resolve", keepPath, deletePaths),
   actressSetPhoto: (name: string): Promise<Record<string, string>> =>
     ipcRenderer.invoke("actress:setPhoto", name),
   addSubtitleDir: (): Promise<AppShellState> =>

@@ -22,6 +22,7 @@ export function ScanOptionsDialog({
   onClose,
 }: ScanOptionsDialogProps) {
   const systemScan = scanSourceMode === "system";
+  const renameOnly = !systemScan && scanOptionsDraft.renameOnly === true;
   const libraryPath = systemScan ? "Original locations on connected drives" :
     pendingScanMode === "normal"
       ? organizationDraft.normalLibraryPath
@@ -52,6 +53,7 @@ export function ScanOptionsDialog({
               <input checked={scanSourceMode === "system"} type="radio" name="scan-source" onChange={() => {
                 onChangeScanSource("system");
                 onChangeScanOption("moveRename", false);
+                onChangeScanOption("renameOnly", false);
                 onChangeScanOption("copyToLibrary", false);
                 onChangeScanOption("autoResolveDuplicates", false);
                 onChangeScanOption("autoConvertToMp4", false);
@@ -108,7 +110,7 @@ export function ScanOptionsDialog({
         <div className="scan-section">
           <p className="scan-section-label">File handling</p>
           <p className="subtle" style={{ margin: "0.25rem 0 0" }}>
-            {scanOptionsDraft.moveRename
+            {renameOnly ? "Use your filename template to rename videos and matching sidecars in their current folders." : scanOptionsDraft.moveRename
               ? "Videos and matched subtitles will be moved into your library folder structure."
               : "Videos and local subtitles stay at their original paths. Optional MP4 conversion creates a new file and keeps the original. No renaming or poster sidecars. Duplicate cleanup runs only if you select it below. Optional subtitle downloads add a new file beside the video."}
           </p>
@@ -121,8 +123,8 @@ export function ScanOptionsDialog({
             <label className="toggle-field">
               <input
                 disabled={systemScan}
-                checked={!scanOptionsDraft.moveRename}
-                onChange={() => onChangeScanOption("moveRename", false)}
+                checked={!renameOnly && !scanOptionsDraft.moveRename}
+                onChange={() => { onChangeScanOption("renameOnly", false); onChangeScanOption("moveRename", false); }}
                 type="radio"
                 name="import-placement"
               />
@@ -131,10 +133,15 @@ export function ScanOptionsDialog({
               </span>
             </label>
             <label className="toggle-field">
+              <input disabled={systemScan} checked={renameOnly} type="radio" name="import-placement"
+                onChange={() => { onChangeScanOption("moveRename", false); onChangeScanOption("renameOnly", true); }} />
+              <span>Rename only — keep files in their current folders</span>
+            </label>
+            <label className="toggle-field">
               <input
                 disabled={systemScan}
                 checked={scanOptionsDraft.moveRename}
-                onChange={() => onChangeScanOption("moveRename", true)}
+                onChange={() => { onChangeScanOption("renameOnly", false); onChangeScanOption("moveRename", true); }}
                 type="radio"
                 name="import-placement"
               />
@@ -150,8 +157,8 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                disabled={systemScan}
-                checked={scanOptionsDraft.importBetterQuality}
+                disabled={systemScan || renameOnly}
+                checked={!renameOnly && scanOptionsDraft.importBetterQuality}
                 onChange={(e) => onChangeScanOption("importBetterQuality", e.target.checked)}
                 type="checkbox"
               />
@@ -159,7 +166,8 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                checked={scanOptionsDraft.autoResolveDuplicates}
+                disabled={renameOnly}
+                checked={!renameOnly && scanOptionsDraft.autoResolveDuplicates}
                 onChange={(e) => onChangeScanOption("autoResolveDuplicates", e.target.checked)}
                 type="checkbox"
               />
@@ -184,7 +192,8 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                checked={scanOptionsDraft.autoConvertToMp4}
+                disabled={renameOnly}
+                checked={!renameOnly && scanOptionsDraft.autoConvertToMp4}
                 onChange={(e) => onChangeScanOption("autoConvertToMp4", e.target.checked)}
                 type="checkbox"
               />
@@ -192,8 +201,8 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                disabled={systemScan}
-                checked={scanOptionsDraft.autoMatchSubtitle}
+                disabled={systemScan || renameOnly}
+                checked={renameOnly || scanOptionsDraft.autoMatchSubtitle}
                 onChange={(e) => onChangeScanOption("autoMatchSubtitle", e.target.checked)}
                 type="checkbox"
               />
@@ -201,7 +210,8 @@ export function ScanOptionsDialog({
             </label>
             <label className="toggle-field">
               <input
-                checked={scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
+                disabled={renameOnly}
+                checked={!renameOnly && scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
                 onChange={(e) =>
                   onChangeScanOption("autoDownloadSubtitleFromSubtitleCat", e.target.checked)
                 }
@@ -216,7 +226,7 @@ export function ScanOptionsDialog({
                 onChange={(e) =>
                   onChangeScanOption("preferredSubtitleLanguage", e.target.value as ScanAutomationOptions["preferredSubtitleLanguage"])
                 }
-                disabled={!scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
+                disabled={renameOnly || !scanOptionsDraft.autoDownloadSubtitleFromSubtitleCat}
               >
                 <option value="zh-hans">Chinese Simplified</option>
                 <option value="zh-hant">Chinese Traditional</option>

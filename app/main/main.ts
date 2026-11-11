@@ -3,10 +3,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, WebContentsView } from "electron";
 import { DatabaseClient } from "../database/database";
 import { moveMovieToMode } from "../services/fileService";
-import { buildTargetSubtitlePath } from "../services/libraryLayout";
+import { buildTargetSubtitlePath, parseNfoXml } from "../services/libraryLayout";
+import type { ActressMetadataRescanSummary } from "../shared/contracts";
 import { DEFAULT_SCAN_OPTIONS, scanLibraries, createCancelToken, registerLocalFiles, type CancelToken } from "../services/libraryScanner";
 import { extractSubtitleLanguage } from "../services/libraryScanner";
 import { readGuardsChainState, readGuardsChainSegments } from "../services/guardsChain";
@@ -14,6 +15,8 @@ import { SUBTITLE_EXTENSIONS } from "../shared/contracts";
 import { enrichMoviePoster } from "../services/metadataService";
 import { fetchSubtitleCatResults } from "../services/subtitleCat";
 import { runFfmpeg } from "../services/ffmpegService";
+import { resolveDuplicateGroup } from "../services/duplicateResolution";
+import { canAccessMovie, scanRootsForSession } from "../services/gentleGate";
 import type {
   AppShellState,
   MetadataSettings,
@@ -921,6 +924,14 @@ async function backfillMoviePosters(
       continue;
     }
 
+    // Gentle artwork must not be generated (or its title echoed in progress)
+    // while the session is locked. Callers that pass IDs directly are gated
+    // here, not only in the list handlers.
+    if (!canAccessMovie(movie.libraryMode, gentleUnlocked)) {
+      summary.skipped += 1;
+      continue;
+    }
+
     if (movie.posterUrl && !forceRefresh) {
       summary.skipped += 1;
       continue;
@@ -988,6 +999,14 @@ async function backfillMoviePosters(
 // site's markup.
 
 function registerHandlers(): void {
+  const browser = require("../services/inAppBrowser.cjs").createInAppBrowser({ app, BrowserWindow, WebContentsView, ipcMain, session });
+  ipcMain.handle("app:openBrowser", (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error("Open the browser from the main app window.");
+    browser.open();
+  });
+const playerWindow = require("../services/playerWindow.cjs").createPlayerWindow({app:app, BrowserWindow:BrowserWindow, ipcMain:ipcMain, path:path, database, getMainWindow:()=>mainWindow, isGentleUnlocked:()=>gentleUnlocked, sendMovie:(window: BrowserWindow,movie: MovieRecord | null)=>window.webContents.send("player:windowMovie",movie)});
+ipcMain.handle("player:openWindow",playerWindow.open);
+ipcMain.handle("player:getWindowMovie",playerWindow.getMovie);
     ipcMain.handle("settings:getGentleShortcut", async () => {
       return database.getGentleShortcut();
     });
@@ -1051,22 +1070,33 @@ function registerHandlers(): void {
   );
 
       const removeMovieEntries = require("../services/movieRemoval.cjs").createMovieRemover({ database, isGentleUnlocked: () => gentleUnlocked, trash: (file: string) => shell.trashItem(file), confirm: async (request: { title: string; message: string; detail: string; button: string }) => { const result = await dialog.showMessageBox(mainWindow!, { type: "warning", title: request.title, message: request.message, detail: request.detail, buttons: ["Cancel", request.button], defaultId: 0, cancelId: 0, noLink: true }); return result.response === 1; } });
-    ipcMain.handle("movies:remove", async (event, ids: string[], action: "library" | "trash") => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Stop the scan before removing movies."); return removeMovieEntries(ids, action); });
+    ipcMain.handle("movies:remove", async (event, ids: string[], action: "library" | "trash") => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken || movieRenamer.isBusy()) throw new Error("Wait for the scan or rename to finish before removing movies."); return removeMovieEntries(ids, action); });
 const linkActressMovies = require("../services/actressMovies.cjs").createActressMovieLinker({ database, isGentleUnlocked: () => gentleUnlocked });
     ipcMain.handle("actress:linkMovies", async (event, name: string, ids: string[]) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Wait for the scan to finish before linking movies."); return linkActressMovies(name, ids); });
+    let actressRescan: Promise<ActressMetadataRescanSummary> | undefined;
+    ipcMain.handle("actress:rescanMetadata", async (event) => {
+      if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Unavailable outside the main app.");
+      if (activeScanToken) throw new Error("Wait for the library scan to finish.");
+      actressRescan ??= Promise.resolve(require("../services/actressMetadataRescan.cjs").rescanActressMetadata(database, {
+        isGentleUnlocked: () => gentleUnlocked, parseNfoXml
+      })).finally(() => { actressRescan = undefined; });
+      return actressRescan;
+    });
     ipcMain.handle("movies:summary", (event) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); return require("../services/librarySummary.cjs").librarySummary(database, gentleUnlocked); });
-    ipcMain.handle("movies:list", async (_event, args?: { query?: string; limit?: number; offset?: number }) => {
+    ipcMain.handle("movies:list", async (_event, args?: { query?: string; mode?: LibraryMode; limit?: number; offset?: number }) => {
     return database.listMovies({
       includeGentle: gentleUnlocked,
+            mode: args?.mode === "gentle" ? "gentle" : args?.mode === "normal" ? "normal" : undefined,
       query: args?.query ?? "",
       limit: args?.limit ?? 200,
       offset: args?.offset ?? 0
     });
   });
 
-  ipcMain.handle("movies:count", async (_event, args?: { query?: string }) => {
+  ipcMain.handle("movies:count", async (_event, args?: { query?: string; mode?: LibraryMode }) => {
     return database.countMovies({
       includeGentle: gentleUnlocked,
+            mode: args?.mode === "gentle" ? "gentle" : args?.mode === "normal" ? "normal" : undefined,
       query: args?.query ?? ""
     });
   });
@@ -1083,7 +1113,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     return require("../services/modeSelection.cjs").selectModeIds(database, mode, gentleUnlocked);
   });
   ipcMain.handle("movies:listAll", async () => {
-    return database.listMovies({ includeGentle: true, query: "", limit: 99999, offset: 0 });
+    return database.listMovies({ includeGentle: gentleUnlocked, query: "", limit: 99999, offset: 0 });
   });
 
   ipcMain.handle("movies:ensurePosters", async (_event, movieIds: string[]) => {
@@ -1101,7 +1131,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
   ipcMain.handle("movies:backfillPosters", async () => {
     const movieIds = database
       .listMovies({
-        includeGentle: true,
+        includeGentle: gentleUnlocked,
         query: ""
       })
       .filter((movie) => !movie.posterUrl)
@@ -1112,6 +1142,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
 
   ipcMain.handle("movies:pickScan", async (_event, scanOptions: ScanAutomationOptions) => {
     const targetMode = resolveTargetMode(scanOptions);
+    if (targetMode === "gentle" && !gentleUnlocked) throw new Error("Unlock Gentle mode before scanning into it.");
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openDirectory", "createDirectory"]
     });
@@ -1140,6 +1171,8 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
         ? { normal: result.filePaths, gentle: [] }
         : { normal: [], gentle: result.filePaths };
 
+    if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
+
     activeScanToken = createCancelToken();
     try {
       const summary = await scanLibraries(database, rootsToScan, {
@@ -1162,6 +1195,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     const mode = resolveTargetMode(options);
     if (mode === "gentle" && !gentleUnlocked) throw new Error("Unlock Gentle mode before scanning into it.");
     const scanner = require("../services/wholeSystemScan.cjs");
+    if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
     activeScanToken = createCancelToken();
     emitScanProgress({ stage: "preparing", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: "Whole-system scan: finding connected drives..." });
     try {
@@ -1175,9 +1209,10 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     } finally { activeScanToken = null; }
   });
   ipcMain.handle("movies:scan", async (_event, options?: ScanAutomationOptions) => {
+    if (libraryMove.isBusy() || movieRenamer.isBusy()) throw new Error("Wait for the file operation to finish before scanning.");
     activeScanToken = createCancelToken();
     try {
-      const summary = await scanLibraries(database, database.getRoots(), {
+      const summary = await scanLibraries(database, scanRootsForSession(database.getRoots(), gentleUnlocked), {
         mode: "all",
         onProgress: emitScanProgress,
         scanOptions: options ?? DEFAULT_SCAN_OPTIONS,
@@ -1192,6 +1227,17 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     }
   });
 
+  const libraryMove = require("../services/libraryMove.cjs").createLibraryMove({
+    database, dialog: dialog, moveMovie: moveMovieToMode,
+    getWindow: () => mainWindow, isUnlocked: () => gentleUnlocked, isScanning: () => Boolean(activeScanToken) || movieRenamer.isBusy()
+  });
+  ipcMain.handle("movies:moveMode", (event, id, mode) => libraryMove.run(event, [id], mode));
+  ipcMain.handle("movies:batchMoveMode", libraryMove.run);
+  const movieRenamer = require("../services/movieRename.cjs").createMovieRenamer({
+    database, dialog: dialog, getWindow: () => mainWindow, isUnlocked: () => gentleUnlocked,
+    canRename: () => !activeScanToken && !libraryMove.isBusy()
+  });
+  ipcMain.handle("movies:renameFile", movieRenamer.rename);
   ipcMain.handle("scan:cancel", () => {
     if (activeScanToken) {
       activeScanToken.cancelled = true;
@@ -1241,57 +1287,18 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
   });
 
   ipcMain.handle(
-    "movies:moveMode",
-    async (_event, movieId: string, mode: LibraryMode) => {
-      return moveMovieToMode(database, movieId, mode);
-    }
-  );
-
-  ipcMain.handle(
-    "movies:batchMoveMode",
-    async (_event, movieIds: string[], mode: LibraryMode) => {
-      const moved: MovieRecord[] = [];
-      for (const movieId of movieIds) {
-        moved.push(await moveMovieToMode(database, movieId, mode));
-      }
-      return moved;
-    }
-  );
-
-  ipcMain.handle(
     "duplicates:resolve",
-    async (_event, keepPath: string, deletePaths: string[], gentleUnlocked?: boolean) => {
-      let deleted = 0;
-      let blocked = 0;
-      for (const p of deletePaths) {
-        try {
-          const movieId = database.findMovieIdBySourcePath(p);
-          const movie = movieId ? database.getMovie(movieId) : null;
-
-          if (movie && movie.libraryMode === "gentle" && !gentleUnlocked) {
-            blocked += 1;
-            continue;
-          }
-
-          try {
-            await fsp.unlink(p);
-          } catch {
-            // ignore error
-          }
-
-          if (movieId) {
-            database.deleteMovie(movieId);
-          }
-
-          deleted += 1;
-        } catch (error) {
-          // ignore individual delete errors but proceed
-          // eslint-disable-next-line no-console
-          console.error(`Failed to delete duplicate ${p}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-
-      return { deleted, blocked };
+    async (event, keepPath: string, deletePaths: string[]) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      return resolveDuplicateGroup({
+        database,
+        keepPath,
+        deletePaths,
+        // Gentle state is owned by the main process. A renderer-supplied
+        // "unlocked" flag is never consulted, so a compromised renderer
+        // cannot delete Gentle files by claiming the library is unlocked.
+        isGentleUnlocked: () => gentleUnlocked
+      });
     }
   );
 
@@ -1332,7 +1339,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
 
   ipcMain.handle("actress:refreshPhotos", async () => {
     const { enrichActressPhotos } = await import("../services/metadataService.js");
-    const allMovies = database.listMovies({ includeGentle: true, query: "" });
+    const allMovies = database.listMovies({ includeGentle: gentleUnlocked, query: "" });
     const names = new Set<string>();
     for (const movie of allMovies) {
       for (const name of movie.actresses) {
@@ -1461,60 +1468,58 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
   // These handlers were lost from the checkout; the renderer's Settings UI
   // (useMediaActions) and preload exposes were still calling them. Behavior
   // follows the scanner's own matching convention (libraryScanner.ts).
-  ipcMain.handle("subtitle:addDir", async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
+  ipcMain.handle("subtitle:addDir", async (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Use Settings in the main app.");
+    const result = await dialog.showOpenDialog(mainWindow, {
       title: "Add subtitle directory",
       properties: ["openDirectory", "createDirectory"]
     });
-    if (result.canceled || result.filePaths.length === 0) return buildShellState();
-    const dirs = new Set(database.getSubtitleDirs());
-    dirs.add(result.filePaths[0]);
-    database.setSubtitleDirs([...dirs]);
+    if (!result.canceled && result.filePaths.length > 0) {
+      database.setSubtitleDirs([...new Set([...database.getSubtitleDirs(), ...result.filePaths])]);
+    }
     return buildShellState();
   });
 
-  ipcMain.handle("subtitle:removeDir", async (_event, dir: string) => {
-    database.setSubtitleDirs(
-      database.getSubtitleDirs().filter((existing) => existing !== dir)
-    );
+  ipcMain.handle("subtitle:removeDir", async (event, dir: string) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Use Settings in the main app.");
+    database.setSubtitleDirs(database.getSubtitleDirs().filter(existing => existing !== dir));
     return buildShellState();
   });
 
-  ipcMain.handle("subtitle:scan", async () => {
-    const dirs = database.getSubtitleDirs();
-    const movies = database.listMovies({ includeGentle: true });
-    const result: SubtitleScanResult = { total: 0, matched: 0, skipped: 0, unmatched: 0 };
+  ipcMain.handle("subtitle:scan", async (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Use Settings in the main app.");
+    const candidates: Array<{ stem: string; path: string; language: string }> = [];
+    for (const dir of database.getSubtitleDirs()) {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        const ext = path.extname(entry.name);
+        if (!entry.isFile() || !SUBTITLE_EXTENSIONS.some(value => value === ext.toLowerCase())) continue;
+        candidates.push({
+          stem: path.basename(entry.name, ext).toLowerCase(),
+          path: path.join(dir, entry.name),
+          language: extractSubtitleLanguage(entry.name)
+        });
+      }
+    }
+
+    const movies = database.listMovies({ includeGentle: gentleUnlocked, limit: Number.MAX_SAFE_INTEGER });
+    const result: SubtitleScanResult = { total: movies.length, matched: 0, skipped: 0, unmatched: 0 };
     for (const movie of movies) {
-      result.total++;
       if (movie.subtitles.length > 0) {
         result.skipped++;
         continue;
-        }
-      const candidates: Array<{ language: string; path: string }> = [];
-      for (const dir of dirs) {
-        let entries: string[] = [];
-        try {
-          entries = await fs.promises.readdir(dir);
-        } catch {
-          continue; // vanished or unreadable directory — nothing to match
-        }
-        for (const entry of entries) {
-          const ext = path.extname(entry).toLowerCase();
-          if (!SUBTITLE_EXTENSIONS.includes(ext as (typeof SUBTITLE_EXTENSIONS)[number])) continue;
-          const videoBasename = path.basename(movie.sourcePath, path.extname(movie.sourcePath)).toLowerCase();
-          const subBasename = path.basename(entry, ext).toLowerCase();
-          if (!subBasename.startsWith(videoBasename) && !videoBasename.startsWith(subBasename)) continue;
-          candidates.push({ path: path.join(dir, entry), language: extractSubtitleLanguage(entry) });
-        }
       }
-      if (candidates.length === 0) {
+      const stem = path.basename(movie.sourcePath, path.extname(movie.sourcePath)).toLowerCase();
+      const match = candidates.find(candidate =>
+        candidate.stem === stem || candidate.stem.startsWith(stem + ".") ||
+        candidate.stem.startsWith(stem + "_") || candidate.stem.startsWith(stem + "-")
+      );
+      if (match) {
+        database.upsertSubtitle(movie.id, match.path, match.language);
+        result.matched++;
+      } else {
         result.unmatched++;
-        continue;
       }
-      const first = candidates[0];
-      database.upsertSubtitle(movie.id, first.path, first.language);
-      result.matched++;
-      continue;
     }
     return result;
   });

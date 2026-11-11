@@ -9,7 +9,7 @@ import type { MetadataSettings } from "../../../shared/contracts";
 // lookup caches in module-level Maps, so each test re-imports a fresh module
 // via vi.resetModules() — no test can inherit another test's cache.
 const fetchMock = vi.fn(
-  async (input: string | URL | Request): TestResponse => {
+  async (input: string | URL | Request, _init?: RequestInit): TestResponse => {
     throw new Error(`unexpected fetch in this test: ${String(input)}`);
   }
 );
@@ -63,16 +63,16 @@ beforeEach(async () => {
 });
 
 describe("keyless poster sources", () => {
-  it("falls back to javbus when javdatabase misses the video ID", async () => {
+  it("falls back to JAVDB when javdatabase misses the video ID", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("javdatabase.com")) {
         return httpResponse(404, "");
       }
-      if (url.includes("javbus.com")) {
+      if (url.includes("javdb.com")) {
         return httpResponse(
           200,
-          '<html><meta property="og:image" content="https://pics.example/javbus/abc-123.jpg"></html>'
+          '<html><meta property="og:image" content="https://pics.example/javdb/abc-123.jpg"></html>'
         );
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -80,8 +80,37 @@ describe("keyless poster sources", () => {
 
     const metadata = await metadataService.fetchOnlineMovieMetadataByVideoId("ABC-123");
 
-    expect(metadata?.source).toBe("javbus");
-    expect(metadata?.posterUrl).toBe("https://pics.example/javbus/abc-123.jpg");
+    expect(metadata?.source).toBe("javdb");
+    expect(metadata?.posterUrl).toBe("https://pics.example/javdb/abc-123.jpg");
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeDefined();
+  });
+
+  it("falls back to JAVDB when the first provider request throws", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("javdatabase.com")) {
+        throw new TypeError("network unavailable");
+      }
+      if (url.includes("javdb.com")) {
+        return httpResponse(
+          200,
+          '<html><meta property="og:image" content="https://pics.example/javdb/abc-123.jpg"></html>'
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    try {
+      const metadata = await metadataService.fetchOnlineMovieMetadataByVideoId("ABC-123");
+
+      expect(metadata?.source).toBe("javdb");
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("javdatabase request failed (TypeError)")
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("prefers javdatabase and never calls javbus when javdatabase hits", async () => {
@@ -120,7 +149,11 @@ describe("keyless poster sources", () => {
   it("auto profile falls through both ID sites to a keyless IMDb poster", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.includes("javdatabase.com") || url.includes("javbus.com")) {
+      if (
+        url.includes("javdatabase.com") ||
+        url.includes("javdb.com") ||
+        url.includes("javbus.com")
+      ) {
         return httpResponse(404, "");
       }
       if (url.includes("v2.sg.media-imdb.com/suggestion")) {

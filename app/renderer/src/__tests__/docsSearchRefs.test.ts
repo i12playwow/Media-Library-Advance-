@@ -798,6 +798,11 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     exact: ["DELETE FROM subtitles WHERE movie_id = ?", "DELETE FROM movies WHERE id = ?"],
   },
   {
+    method: "updateMovieMode",
+    fragments: ["UPDATE movies SET library_mode = ?, updated_at = ? WHERE id = ?"],
+    exact: ["UPDATE movies SET library_mode = ?, updated_at = ? WHERE id = ?"],
+  },
+  {
     method: "updateMovieLocation",
     fragments: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
     exact: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
@@ -879,6 +884,7 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "ORDER BY updated_at DESC, title ASC"
     ],
     exact: [
+      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
       "library_mode = 'normal'",
       "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
@@ -901,6 +907,7 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
     ],
     exact: [
+      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
       "library_mode = 'normal'",
       "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
@@ -919,6 +926,7 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
     ],
     exact: [
+      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
       "",
       "library_mode = 'normal'",

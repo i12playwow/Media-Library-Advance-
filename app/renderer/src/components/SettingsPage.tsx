@@ -144,10 +144,10 @@ export function SettingsPage({
           <h3>Online metadata</h3>
           <p className="subtle">
             The app now generates local poster frames from your video files first,
-            then follows the metadata source profile below. Add a TMDB v4 read
-            access token only if you want title-based fallback for files that do
-            not have a usable video ID. Existing titles can be backfilled by
-            running Scan saved folders.
+            then follows the metadata source profile below. Favored JAV sources
+            include javdatabase and JAVDB, while TMDB remains the optional
+            title-based fallback when you provide a v4 read access token.
+            Existing titles can be backfilled by running Scan saved folders.
           </p>
           <p className="subtle">
             Get your token from{" "}
@@ -283,8 +283,8 @@ export function SettingsPage({
             TMDB is used only for the optional title-based fallback and is not endorsed
             or certified by TMDB. Use TMDB only for content that complies with their
             terms and attribution requirements. The other poster sources — local frame
-            capture, javdatabase, javbus, and IMDb's public suggestion endpoint —
-            need no API key and no token.
+            capture, javdatabase, JAVDB, javbus, and IMDb's public suggestion
+            endpoint — need no API key and no token.
           </p>
         </div>
 

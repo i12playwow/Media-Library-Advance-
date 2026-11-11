@@ -33,25 +33,25 @@ this table):
 | `settings:*` | preferences and metadata/organization settings | `settings:getGentleShortcut`, `settings:setGentleShortcut`, `settings:verifyGentlePin`, `settings:getThemeMode`, `settings:setThemeMode`, `settings:saveMetadata`, `settings:saveOrganization`, `settings:pickLibraryFolder` |
 | `gentle:*` | gentle mode state changes | `gentle:toggle` (invoke), `gentle:unlockResult` (push) |
 | `auth:*` | the same gentle gate, named for who may call it | `auth:unlockGentle` (PIN), `auth:toggleGentle` (shortcut) |
-| `app:*` | whole-shell snapshot | `app:getState` |
-| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:summary`, `movies:remove`, `movies:scanWholeSystem`, `movies:selectModeIds`, `movies:count`, `movies:modeCounts`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode` |
+| `app:*` | whole-shell snapshot and browser launch | `app:getState`, `app:openBrowser` |
+| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:summary`, `movies:remove`, `movies:scanWholeSystem`, `movies:selectModeIds`, `movies:count`, `movies:modeCounts`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode`, `movies:renameFile` |
 | `scan:*` | scan lifecycle | `scan:cancel` (invoke), `scan:progress` (push) |
 | `library:*` | library roots | `library:addRoot` |
 | `shell:*` | OS integration | `shell:openFile`, `shell:showInFolder` |
-| `actress:*` | actress photos and regions | `actress:getPhotos`, `actress:linkMovies`, `actress:getRegions`, `actress:getRegion`, `actress:refreshPhotos`, `actress:removePhoto`, `actress:listPhotos`, `actress:setPrimaryPhoto`, `actress:setRegion`, `actress:setPhoto` |
-| `player:*` | playback | `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4` |
+| `actress:*` | actress photos, regions, and metadata | `actress:getPhotos`, `actress:linkMovies`, `actress:rescanMetadata`, `actress:getRegions`, `actress:getRegion`, `actress:refreshPhotos`, `actress:removePhoto`, `actress:listPhotos`, `actress:setPrimaryPhoto`, `actress:setRegion`, `actress:setPhoto` |
+| `player:*` | playback | `player:openWindow`, `player:getWindowMovie`, `player:windowMovie` (push), `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4` |
 | `subtitle:*` | subtitle generation and local subtitle directories | `subtitle:addDir`, `subtitle:removeDir`, `subtitle:scan`, `subtitle:generateForMovie`, `subtitle:getModelAvailability`, `subtitle:downloadModel`, `subtitle:previewOutput`, `subtitle:modelDownloadProgress` (push) |
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
 | `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-13 prefixes, 62 invoke channels (one `ipcMain.handle` each, all in main.ts),
-3 push channels (one `webContents.send` each, all in main.ts, subscribed via
+13 prefixes, 67 invoke channels (one `ipcMain.handle` each, all in main.ts),
+4 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
-`onSubtitleModelDownloadProgress`).
+`onSubtitleModelDownloadProgress`, and `onPlayerWindowMovie`).
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 62 invoke channels has a
+- **Every named channel is real.** Each of the 67 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`
@@ -79,3 +79,54 @@ Two invariants worth knowing beyond the table:
   `useBootstrap` (initial `app:getState`), `useLibrary` (`movies:list` /
   `movies:modeCounts` and the gentle refilter), `useKeyboardShortcuts`
   (`auth:toggleGentle` on Ctrl+Alt+D), `useSettings`.
+
+## Library moves and metadata requests
+
+`app/services/libraryLayout.ts` validates generated destinations against the
+selected library root, including the resolved filesystem path after directory
+creation. `app/services/fileService.ts` moves the video and subtitles together,
+updates their catalog rows in one SQLite transaction, and attempts to restore
+the files and previous NFO if a later step fails. A failed rollback is reported
+with the paths that need attention.
+
+External poster-provider requests in `app/services/metadataService.ts` use a
+15-second abort timeout. Provider request errors are logged once per provider
+and error type, then the lookup continues through the configured fallback
+chain.
+
+## Gentle-mode trust boundary
+
+Gentle Mode is a privacy gate for a shared desktop, not encryption. While the
+session is locked, Gentle titles are kept out of library reads, counts, scans,
+poster work, and actress metadata refreshes, and file-changing actions that
+could touch them are refused. The videos stay ordinary files on disk and the
+SQLite catalog still stores their paths and metadata, so anyone who can read
+the profile directory or the media folders can bypass the app entirely. The
+gate does not defend against malware running as the same user, a keylogger,
+screen capture, filesystem forensics, or an attacker with OS-level access.
+
+The session flag (`gentleUnlocked`) is owned by the main process. Renderers
+never send an "unlocked" argument: handlers either filter with
+`includeGentle` from that flag or call a service with an `isGentleUnlocked`
+callback bound to it, so a renderer that claims to be unlocked is ignored.
+Locking broadcasts the new state and the renderer drops the Gentle rows.
+
+Enforced on these paths:
+
+- **Reads and bulk enumeration.** `movies:list`, `movies:count`,
+  `movies:summary`, `movies:modeCounts`, `movies:listAll`,
+  `movies:selectModeIds`, `subtitle:scan`, and `actress:rescanMetadata` gate
+  on the session flag. `movies:backfillPosters` and `actress:refreshPhotos`
+  enumerate only the visible library, and poster generation skips a Gentle
+  row while locked.
+- **Scans.** `movies:scanWholeSystem` and `movies:pickScan` refuse a Gentle
+  target. `movies:scan` runs through `scanRootsForSession`, which empties the
+  saved Gentle roots while locked, so a locked session never walks them.
+- **File changes.** `movies:moveMode`, `movies:batchMoveMode`,
+  `movies:renameFile`, `movies:remove`, and `duplicates:resolve` re-check the
+  stored mode and the main-process lock at execution time, after any
+  confirmation dialog. Duplicate resolution also rejects the kept copy,
+  paths outside the catalog and configured roots, non-video files, and
+  mismatched video IDs (`app/services/duplicateResolution.ts`).
+- **Playback.** `player:openWindow` refuses a Gentle movie ID while locked,
+  and locking closes a player that is showing one.

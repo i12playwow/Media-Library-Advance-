@@ -159,4 +159,4 @@ async function scanWholeSystem(database, { roots, resolveLongPath = true, autoDo
   report(cancelToken.cancelled ? 'cancelled' : 'completed', null, null, true);
   return { discovered, imported, skipped, skippedAlreadyScanned, skippedUnrecognized, duplicatesResolved, errors, subtitleSearchLogs, invalidFiles, duplicateGroups: [], scannedRoots, cancelled: Boolean(cancelToken.cancelled) };
 }
-module.exports = { connectedDrives, scanWholeSystem, within };
+module.exports = { connectedDrives, scanWholeSystem, within, shouldSkipDirectory: name => SKIP.has(name.toLowerCase()) };

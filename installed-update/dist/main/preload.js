@@ -1,7 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
+let libraryViewMode=new URLSearchParams(window.location.search).has('playerWindow')?'all':'normal';
 const api = {
+ getLibraryViewMode: () => libraryViewMode,
+ setLibraryViewMode: (mode) => {if(mode!=="normal"&&mode!=="gentle")throw Error('Choose Normal or Gentle');libraryViewMode=mode;},
+openPlayerWindow: id => electron_1.ipcRenderer.invoke("player:openWindow",id),
+ getPlayerWindowMovie: () => electron_1.ipcRenderer.invoke("player:getWindowMovie"),
+ onPlayerWindowMovie: callback => {const listener=(_,movie)=>callback(movie);electron_1.ipcRenderer.on("player:windowMovie",listener);return()=>{electron_1.ipcRenderer.removeListener("player:windowMovie",listener);};},
     getGentleShortcut: () => electron_1.ipcRenderer.invoke("settings:getGentleShortcut"),
     setGentleShortcut: (shortcut) => electron_1.ipcRenderer.invoke("settings:setGentleShortcut", shortcut),
     toggleGentleMode: () => electron_1.ipcRenderer.invoke("gentle:toggle"),
@@ -9,6 +15,7 @@ const api = {
     getThemeMode: () => electron_1.ipcRenderer.invoke("settings:getThemeMode"),
     setThemeMode: (themeMode) => electron_1.ipcRenderer.invoke("settings:setThemeMode", themeMode),
     getAppState: () => electron_1.ipcRenderer.invoke("app:getState"),
+    openBrowser: () => electron_1.ipcRenderer.invoke("app:openBrowser"),
     getFtsHealth: () => electron_1.ipcRenderer.invoke("settings:getFtsHealth"),
     rebuildFtsIndex: () => electron_1.ipcRenderer.invoke("settings:rebuildFtsIndex"),
     saveMetadataSettings: (settings) => electron_1.ipcRenderer.invoke("settings:saveMetadata", settings),
@@ -17,17 +24,19 @@ const api = {
     openFile: (filePath) => electron_1.ipcRenderer.invoke("shell:openFile", filePath),
     showInFolder: (filePath) => electron_1.ipcRenderer.invoke("shell:showInFolder", filePath),
     pickScanFolder: (options) => electron_1.ipcRenderer.invoke("movies:pickScan", options),
-    listMovies: (query, limit, offset, sortOrder) => electron_1.ipcRenderer.invoke("movies:list", { query, limit, offset, sortOrder }),
-    countMovies: (query) => electron_1.ipcRenderer.invoke("movies:count", { query }),
+    listMovies: (query, limit, offset, sortOrder) => electron_1.ipcRenderer.invoke("movies:list", { query, limit, offset, sortOrder, mode: libraryViewMode }),
+    countMovies: (query) => electron_1.ipcRenderer.invoke("movies:count", { query, mode: libraryViewMode }),
     ensureMoviePosters: (movieIds) => electron_1.ipcRenderer.invoke("movies:ensurePosters", movieIds),
     refreshMoviePosters: (movieIds) => electron_1.ipcRenderer.invoke("movies:refreshPosters", movieIds),
     backfillMissingPosters: () => electron_1.ipcRenderer.invoke("movies:backfillPosters"),
     linkActressMovies: (name, ids) => electron_1.ipcRenderer.invoke("actress:linkMovies", name, ids),
+    rescanActressMetadata: () => electron_1.ipcRenderer.invoke("actress:rescanMetadata"),
     librarySummary: () => electron_1.ipcRenderer.invoke("movies:summary"),
     scanWholeSystem: options => electron_1.ipcRenderer.invoke("movies:scanWholeSystem", options),
     scanLibraries: (options) => electron_1.ipcRenderer.invoke("movies:scan", options),
     cancelScan: () => electron_1.ipcRenderer.invoke("scan:cancel"),
     addLibraryRoot: (mode) => electron_1.ipcRenderer.invoke("library:addRoot", mode),
+    renameMovieFile: (id, action) => electron_1.ipcRenderer.invoke("movies:renameFile", id, action),
     moveMovie: (movieId, mode) => electron_1.ipcRenderer.invoke("movies:moveMode", movieId, mode),
     moveMovies: (movieIds, mode) => electron_1.ipcRenderer.invoke("movies:batchMoveMode", movieIds, mode),
     unlockGentle: (pin) => electron_1.ipcRenderer.invoke("auth:unlockGentle", pin),
@@ -56,6 +65,11 @@ const api = {
     playerClearPlaybackCheckpoint: (movieId) => electron_1.ipcRenderer.invoke("player:clearPlaybackCheckpoint", movieId),
     playerGetFileUrl: (filePath, folderPath) => electron_1.ipcRenderer.invoke("player:getFileUrl", filePath, folderPath ?? null),
     playerConvertToMp4: (filePath) => electron_1.ipcRenderer.invoke("player:convertToMp4", filePath),
+    onLibraryAvailabilityChanged: (handler) => {
+        const listener = () => handler();
+        electron_1.ipcRenderer.on("library:availabilityChanged", listener);
+        return () => electron_1.ipcRenderer.removeListener("library:availabilityChanged", listener);
+    },
     onScanProgress: (handler) => {
         const listener = (_event, progress) => {
             handler(progress);

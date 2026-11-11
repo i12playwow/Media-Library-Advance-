@@ -16,6 +16,7 @@ const SUBGEN_OUTPUT_DIRECTORY_KEY = "mla-subgen-output-directory";
 const SUBGEN_OUTPUT_FILENAME_KEY = "mla-subgen-output-filename";
 
 interface SearchPageProps {
+  gentleUnlocked?: boolean;
   movies: MovieRecord[];
   setSelectedMovieId: (id: string) => void;
   setActivePage: (page: AppPage) => void;
@@ -38,11 +39,11 @@ function formatBytes(value: number | null | undefined): string {
   return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtitleGenerated }: SearchPageProps) {
+export function SearchPage({ gentleUnlocked = false, movies, setSelectedMovieId, setActivePage, onSubtitleGenerated }: SearchPageProps) {
   const desktopApi = window.desktopApi;
   const [selectedMovieId, setSelectedMovieIdLocal] = useState<string>(movies[0]?.id ?? "");
   const [movieQuery, setMovieQuery] = useState("");
-  const [libraryFilter, setLibraryFilter] = useState<"all" | "normal" | "gentle">("all");
+  const [libraryFilter, setLibraryFilter] = useState<"all" | "normal" | "gentle">("normal");
   const [subtitleFilter, setSubtitleFilter] = useState<"missing" | "all" | "ready">("missing");
   const [language, setLanguage] = useState<SubtitleGenerationLanguage>("ja");
   const [model, setModel] = useState<SubtitleGenerationModel>("medium");
@@ -63,6 +64,7 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
   const filteredMovies = useMemo(() => {
     const normalizedQuery = movieQuery.trim().toLowerCase();
     return movies.filter((movie) => {
+      if (movie.libraryMode === "gentle" && !gentleUnlocked) return false;
       if (libraryFilter !== "all" && movie.libraryMode !== libraryFilter) {
         return false;
       }
@@ -88,7 +90,8 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
 
       return searchHaystack.includes(normalizedQuery);
     });
-  }, [movies, movieQuery, libraryFilter, subtitleFilter]);
+  }, [movies, movieQuery, libraryFilter, subtitleFilter, gentleUnlocked]);
+  useEffect(() => { if (!gentleUnlocked && libraryFilter === "gentle") setLibraryFilter("normal"); }, [gentleUnlocked, libraryFilter]);
   const selectedMovie = useMemo(
     () => filteredMovies.find((movie) => movie.id === selectedMovieId) ?? filteredMovies[0] ?? null,
     [filteredMovies, selectedMovieId]
@@ -306,6 +309,10 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
         });
         setShowDownloadPrompt(true);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setModelDownloadResult({ok: false, model, available: false, modelPath: null, message: 'Unable to start model download: ' + message, setupRequired: false});
+      setShowDownloadPrompt(true);
     } finally {
       setIsDownloadingModel(false);
     }
@@ -419,6 +426,10 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
         <p className="subtle">
           Local subtitle generation for library files. This flow is built for Japanese and Chinese speech transcription. Whisper translation is not being used here for JP to CN conversion.
         </p>
+        <div className="subgen-mode-tabs" role="group" aria-label="Sub-Gen library mode">
+          <button type="button" aria-pressed={libraryFilter === "normal"} onClick={() => setLibraryFilter("normal")}>Normal</button>
+          <button type="button" aria-pressed={libraryFilter === "gentle"} disabled={!gentleUnlocked} title={!gentleUnlocked ? "Unlock Gentle mode first" : undefined} onClick={() => setLibraryFilter("gentle")}>{gentleUnlocked ? "Gentle" : "Gentle · Locked"}</button>
+        </div>
         <div className="home-workflow" style={{ marginBottom: "1rem" }}>
           <span>{movies.length} in library</span>
           <span>{totalMissingSubtitles} need subtitles</span>
@@ -440,16 +451,6 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
                   onChange={(event) => setMovieQuery(event.target.value)}
                   placeholder="Title, video ID, path"
                 />
-              </span>
-            </div>
-            <div>
-              <strong>Library</strong>
-              <span>
-                <select value={libraryFilter} onChange={(event) => setLibraryFilter(event.target.value as "all" | "normal" | "gentle")}>
-                  <option value="all">All libraries</option>
-                  <option value="normal">Normal only</option>
-                  <option value="gentle">Gentle only</option>
-                </select>
               </span>
             </div>
             <div>
@@ -538,10 +539,8 @@ export function SearchPage({ movies, setSelectedMovieId, setActivePage, onSubtit
             <div className="inline-actions">
               <button
                 className="primary-button"
-                onClick={() => {
-                  setDismissedDownloadPromptFor(null);
-                  setShowDownloadPrompt(true);
-                }}
+                disabled={isDownloadingModel || isCheckingModel}
+                onClick={() => void handleDownloadModel()}
                 type="button"
               >
                 Download {model}
