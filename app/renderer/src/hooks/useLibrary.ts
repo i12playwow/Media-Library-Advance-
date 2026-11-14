@@ -248,6 +248,7 @@ export function useLibrary({
       desktopApi.listMovies(query, PAGE_SIZE, offset),
       append ? Promise.resolve(null) : desktopApi.countMoviesByMode(query),
     ]);
+    if (request === libraryRequest.current) libraryOffset.current = offset + nextMovies.length;
 
     startTransition(() => {
       setMovies((prev) => distinctPosterMovies(append ? [...prev, ...nextMovies] : nextMovies, false));
