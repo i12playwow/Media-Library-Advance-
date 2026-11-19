@@ -20,6 +20,9 @@ interface UsePlayerOptions {
 export function usePlayer({ desktopApi, movies, allMoviesPool, onSubtitleInstalled }: UsePlayerOptions) {
   // ── Refs ──────────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const playerConfigRef = useRef<HTMLDivElement>(null);
   const positionMemoryRef = useRef<Map<string, number>>(new Map());
@@ -126,12 +129,37 @@ export function usePlayer({ desktopApi, movies, allMoviesPool, onSubtitleInstall
     };
   }, [playerSubTrackUrl]);
 
-  // Sync volume & mute to video imperatively (React doesn't support `volume` as a prop)
+  // Route playback through Web Audio so volume can be amplified above 100%.
   useEffect(() => {
-    if (!videoRef.current) return;
-    videoRef.current.volume = playerVolume;
-    videoRef.current.muted = playerMuted;
-  }, [playerVolume, playerMuted]);
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+      if (!mediaSourceRef.current) {
+        mediaSourceRef.current = audioContextRef.current.createMediaElementSource(video);
+        gainNodeRef.current = audioContextRef.current.createGain();
+        mediaSourceRef.current.connect(gainNodeRef.current);
+        gainNodeRef.current.connect(audioContextRef.current.destination);
+      }
+      if (audioContextRef.current.state === "suspended") void audioContextRef.current.resume();
+      if (gainNodeRef.current) gainNodeRef.current.gain.value = playerMuted ? 0 : Math.max(0, Math.min(3, playerVolume));
+      video.volume = 1;
+      video.muted = false;
+    } catch {
+      // Fall back to the media element's native 0–100% volume if Web Audio is unavailable.
+      video.volume = Math.max(0, Math.min(1, playerVolume));
+      video.muted = playerMuted;
+    }
+  }, [playerVolume, playerMuted, playerFileUrl]);
+
+  useEffect(() => () => {
+    mediaSourceRef.current?.disconnect();
+    gainNodeRef.current?.disconnect();
+    void audioContextRef.current?.close();
+    mediaSourceRef.current = null;
+    gainNodeRef.current = null;
+    audioContextRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!videoRef.current || !playerFileUrl) return;

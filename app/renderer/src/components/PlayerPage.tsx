@@ -99,6 +99,11 @@ interface PlayerPageProps {
   playerDownloadSubtitleFile: (url: string) => Promise<string | null>;
   playerOpenFile: (filePath: string) => Promise<void>;
   playerShowInFolder: (filePath: string) => Promise<void>;
+  detachedWindow?: boolean;
+  frameless?: boolean;
+  windowMaximized?: boolean;
+  onToggleFrameless?: () => void;
+  onWindowAction?: (action: "minimize" | "maximize" | "close") => void;
 }
 
 export function PlayerPage({
@@ -157,6 +162,11 @@ export function PlayerPage({
   playerSaveSettings,
   playerDownloadSubtitleFile,
   playerOpenFile,
+  detachedWindow = false,
+  frameless = false,
+  windowMaximized = false,
+  onToggleFrameless,
+  onWindowAction,
 }: PlayerPageProps) {
   const [isConverting, setIsConverting] = useState(false);
   const playerMovie = movies.find((m) => m.id === playerMovieId) ?? allMoviesPool.find((m) => m.id === playerMovieId) ?? null;
@@ -223,7 +233,17 @@ export function PlayerPage({
   }, [playerShowMovieList]);
 
   return (
-    <section className="page player-page" ref={playerContainerRef}>
+    <section className={`page player-page${frameless ? " player-page-frameless" : ""}`} ref={playerContainerRef}>
+      {detachedWindow && frameless && (
+        <div className="player-window-bar">
+          <span className="player-window-drag">MLA+ Player</span>
+          <div className="player-window-actions">
+            <button aria-label="Minimize player window" title="Minimize" type="button" onClick={() => onWindowAction?.("minimize")}>−</button>
+            <button aria-label={windowMaximized ? "Restore player window" : "Maximize player window"} title={windowMaximized ? "Restore" : "Maximize"} type="button" onClick={() => onWindowAction?.("maximize")}>{windowMaximized ? "❐" : "□"}</button>
+            <button className="player-window-close" aria-label="Close player window" title="Close" type="button" onClick={() => onWindowAction?.("close")}>×</button>
+          </div>
+        </div>
+      )}
       {/* Top bar: now-playing title + actions */}
       <div className="player-topbar">
         <div className="player-now-playing">
@@ -646,17 +666,17 @@ export function PlayerPage({
               </button>
               <input
                 className="player-volume"
-                type="range" min={0} max={1} step={0.05}
+                type="range" min={0} max={3} step={0.05}
                 value={playerMuted ? 0 : playerVolume}
-                aria-label="Volume level"
-                title="Adjust volume"
+                aria-label={`Volume level ${Math.round(playerVolume * 100)}%`}
+                title={`Volume ${Math.round(playerVolume * 100)}%`}
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   setPlayerVolume(v);
                   setPlayerMuted(v === 0);
-                  if (videoRef.current) { videoRef.current.volume = v; videoRef.current.muted = v === 0; }
                 }}
               />
+              <span className="player-volume-value">{Math.round((playerMuted ? 0 : playerVolume) * 100)}%</span>
               <button
                 className="player-btn"
                 title="Speed — click to cycle  [ slower  ] faster  = normal"
@@ -682,6 +702,11 @@ export function PlayerPage({
                 }}>
                 {playerIsFullscreen ? "⊡" : "⛶"}
               </button>
+              {detachedWindow && onToggleFrameless && (
+                <button className={`player-btn${frameless ? " active" : ""}`} title={frameless ? "Use standard window frame" : "Use frameless window"} aria-label={frameless ? "Use standard window frame" : "Use frameless window"} type="button" onClick={onToggleFrameless}>
+                  {frameless ? "▣" : "□"}
+                </button>
+              )}
               <div ref={playerConfigRef as React.RefObject<HTMLDivElement>} className={styles.configRelative}>                <button
                   className={`player-btn${playerShowConfig ? " active" : ""}`}
                   title="Player settings"

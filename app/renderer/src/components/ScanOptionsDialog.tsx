@@ -36,7 +36,10 @@ export function ScanOptionsDialog({
             <p className="eyebrow">Scan</p>
             <h3>{pendingScanMode === "normal" ? "Normal mode" : "Gentle mode"} setup</h3>
             <p className="subtle">
-              JAV-only scan: files without a recognizable movie code in the filename or immediate folder are skipped. Original files are kept.
+              {scanOptionsDraft.javOnly !== false
+                ? "JAV-only scan: files without a recognizable movie code in the filename or immediate folder are skipped. Turn off \"JAV-only\" below to import all video files."
+                : "All video files will be imported regardless of filename pattern."}
+              {" Original files are kept."}
             </p>
           </div>
           <div className="scan-modal-badges">
@@ -146,6 +149,23 @@ export function ScanOptionsDialog({
                 name="import-placement"
               />
               <span>Move and rename files into library folders</span>
+            </label>
+            <label className="toggle-field">
+              <input
+                checked={scanOptionsDraft.javOnly !== false}
+                onChange={(e) => onChangeScanOption("javOnly", e.target.checked)}
+                type="checkbox"
+              />
+              <span>JAV-only scan — skip files without a recognizable movie code (e.g. ABC-123, FC2-PPV-123456)</span>
+            </label>
+            <label className="toggle-field">
+              <input
+                disabled={systemScan || renameOnly || !scanOptionsDraft.moveRename}
+                checked={!systemScan && !renameOnly && scanOptionsDraft.moveRename && scanOptionsDraft.autoMetadataRename !== false}
+                onChange={(e) => onChangeScanOption("autoMetadataRename", e.target.checked)}
+                type="checkbox"
+              />
+              <span>Auto-rename using metadata — use online title (JAVDatabase, JavDB, IMDb, TMDB) for file and folder names</span>
             </label>
             <label className="toggle-field">
               <input

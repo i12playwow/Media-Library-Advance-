@@ -18,6 +18,7 @@ export interface VideoProbeResult {
   durationSeconds?: number;
   width?: number | null;
   height?: number | null;
+  subtitleStreamCount?: number;
 }
 
 interface ProcessResult {
@@ -77,9 +78,9 @@ export async function probeVideoFile(filePath: string): Promise<VideoProbeResult
       };
     };
 
-    const videoStreams = Array.isArray(payload.streams)
-      ? payload.streams.filter((stream) => stream.codec_type === "video")
-      : [];
+    const streams = Array.isArray(payload.streams) ? payload.streams : [];
+    const videoStreams = streams.filter((stream) => stream.codec_type === "video");
+    const subtitleStreamCount = streams.filter((stream) => stream.codec_type === "subtitle").length;
 
     if (videoStreams.length === 0) {
       return {
@@ -107,7 +108,8 @@ export async function probeVideoFile(filePath: string): Promise<VideoProbeResult
       valid: true,
       durationSeconds,
       width: primaryStream.width ?? null,
-      height: primaryStream.height ?? null
+      height: primaryStream.height ?? null,
+      subtitleStreamCount
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown media probe error";

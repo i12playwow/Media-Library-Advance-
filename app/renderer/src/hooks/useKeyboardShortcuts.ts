@@ -16,7 +16,7 @@ interface UseKeyboardShortcutsOptions {
   setPlayerShowMovieList?: (v: boolean) => void;
   setPlayerPlaying?: (v: boolean) => void;
   setPlayerMuted?: (v: boolean) => void;
-  setPlayerVolume?: (v: number) => void;
+  setPlayerVolume?: React.Dispatch<React.SetStateAction<number>>;
   setPlayerRate?: (v: number) => void;
   setPlayerCurrentTime?: (v: number) => void;
   navigatePlaylist?: (dir: 1 | -1) => void;
@@ -194,14 +194,12 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
           setPlayerCurrentTime?.(video.currentTime);
           return;
         }
-        // Up/Down → volume ±5%
+        // Up/Down → volume ±5%, including amplification up to 300%.
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
-          const next = Math.max(0, Math.min(1, Math.round((video.volume + (e.key === "ArrowUp" ? 0.05 : -0.05)) * 100) / 100));
-          video.volume = next;
-          video.muted = next === 0;
-          setPlayerVolume?.(next);
-          setPlayerMuted?.(next === 0);
+          const delta = e.key === "ArrowUp" ? 0.05 : -0.05;
+          setPlayerMuted?.(false);
+          setPlayerVolume?.((current) => Math.max(0, Math.min(3, Math.round((current + delta) * 100) / 100)));
           return;
         }
         // [ → slower, ] → faster, = → normal speed

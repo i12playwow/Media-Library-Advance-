@@ -3,7 +3,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, WebContentsView } from "electron";
+import type { BrowserWindow as BrowserWindowType } from "electron";
+
+const { app, BrowserWindow, dialog, ipcMain, protocol, session, shell, WebContentsView } = require("electron") as typeof import("electron");
 import { DatabaseClient } from "../database/database";
 import { moveMovieToMode } from "../services/fileService";
 import { buildTargetSubtitlePath, parseNfoXml } from "../services/libraryLayout";
@@ -17,6 +19,7 @@ import { fetchSubtitleCatResults } from "../services/subtitleCat";
 import { runFfmpeg } from "../services/ffmpegService";
 import { resolveDuplicateGroup } from "../services/duplicateResolution";
 import { canAccessMovie, scanRootsForSession } from "../services/gentleGate";
+import { createMediaProcessingQueue } from "../services/mediaProcessingQueue";
 import type {
   AppShellState,
   MetadataSettings,
@@ -38,14 +41,19 @@ import type {
   SubtitleGenerationModel,
   SubtitleGenerationOptions,
   SubtitleGenerationPreview,
-  SubtitleGenerationResult
+  SubtitleGenerationResult,
+  MediaProcessingJob,
+  MediaProcessingQueueState,
+  MediaProcessingJobKind,
+  MovieLabelMode
 } from "../shared/contracts";
 
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindowType | null = null;
 let database: DatabaseClient;
 let gentleUnlocked = false;
 let activeScanToken: CancelToken | null = null;
 const activeSubtitleModelDownloads = new Map<SubtitleGenerationOptions["model"], Promise<SubtitleModelDownloadResult>>();
+let mediaProcessingQueue: ReturnType<typeof createMediaProcessingQueue>;
 
 function broadcastGentleState(message: string): void {
   mainWindow?.show();
@@ -137,6 +145,8 @@ function buildShellState(): AppShellState {
     platform: process.platform,
     gentleUnlocked,
     themeMode: database.getThemeMode(),
+    displayName: database.getDisplayName(),
+    movieLabelMode: database.getMovieLabelMode(),
     roots: database.getRoots(),
     starterPinHint: database.getStarterPinHint(),
     metadataSettings: database.getMetadataSettings(),
@@ -1004,9 +1014,11 @@ function registerHandlers(): void {
     if (event.sender !== mainWindow?.webContents) throw new Error("Open the browser from the main app window.");
     browser.open();
   });
-const playerWindow = require("../services/playerWindow.cjs").createPlayerWindow({app:app, BrowserWindow:BrowserWindow, ipcMain:ipcMain, path:path, database, getMainWindow:()=>mainWindow, isGentleUnlocked:()=>gentleUnlocked, sendMovie:(window: BrowserWindow,movie: MovieRecord | null)=>window.webContents.send("player:windowMovie",movie)});
+const playerWindow = require("../services/playerWindow.cjs").createPlayerWindow({app:app, BrowserWindow:BrowserWindow, ipcMain:ipcMain, path:path, database, getMainWindow:()=>mainWindow, isGentleUnlocked:()=>gentleUnlocked, sendMovie:(window: BrowserWindowType,movie: MovieRecord | null)=>window.webContents.send("player:windowMovie",movie)});
 ipcMain.handle("player:openWindow",playerWindow.open);
 ipcMain.handle("player:getWindowMovie",playerWindow.getMovie);
+ipcMain.handle("player:setFrameless",playerWindow.setFrameless);
+ipcMain.handle("player:windowAction",playerWindow.windowAction);
     ipcMain.handle("settings:getGentleShortcut", async () => {
       return database.getGentleShortcut();
     });
@@ -1044,6 +1056,16 @@ ipcMain.handle("player:getWindowMovie",playerWindow.getMovie);
     return buildShellState();
   });
 
+  ipcMain.handle("settings:setDisplayName", async (_event, name: string) => {
+    database.setDisplayName(typeof name === "string" ? name : "");
+    return buildShellState();
+  });
+
+  ipcMain.handle("settings:setMovieLabelMode", async (_event, mode: MovieLabelMode) => {
+    database.setMovieLabelMode(mode === "title" || mode === "filename" ? mode : "display-name");
+    return buildShellState();
+  });
+
   ipcMain.handle("app:getState", async () => buildShellState());
 
   // ── Guards chain state (Settings → System) ─────────────────────────────────
@@ -1069,8 +1091,15 @@ ipcMain.handle("player:getWindowMovie",playerWindow.getMovie);
     }
   );
 
-      const removeMovieEntries = require("../services/movieRemoval.cjs").createMovieRemover({ database, isGentleUnlocked: () => gentleUnlocked, trash: (file: string) => shell.trashItem(file), confirm: async (request: { title: string; message: string; detail: string; button: string }) => { const result = await dialog.showMessageBox(mainWindow!, { type: "warning", title: request.title, message: request.message, detail: request.detail, buttons: ["Cancel", request.button], defaultId: 0, cancelId: 0, noLink: true }); return result.response === 1; } });
-    ipcMain.handle("movies:remove", async (event, ids: string[], action: "library" | "trash") => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken || movieRenamer.isBusy()) throw new Error("Wait for the scan or rename to finish before removing movies."); return removeMovieEntries(ids, action); });
+      const removeMovieEntries = require("../services/movieRemoval.cjs").createMovieRemover({ database, isGentleUnlocked: () => gentleUnlocked, trash: (file: string) => shell.trashItem(file), deletePermanently: async (file: string) => { await fsp.unlink(file); }, confirm: async (request: { title: string; message: string; detail: string; button: string }) => { const result = await dialog.showMessageBox(mainWindow!, { type: "warning", title: request.title, message: request.message, detail: request.detail, buttons: ["Cancel", request.button], defaultId: 0, cancelId: 0, noLink: true }); return result.response === 1; } });
+    ipcMain.handle("movies:remove", async (event, ids: string[], action: "library" | "trash" | "delete-permanently") => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken || movieRenamer.isBusy()) throw new Error("Wait for the scan or rename to finish before removing movies."); return removeMovieEntries(ids, action); });
+    ipcMain.handle("movies:removeNoPosterNonAv", async (event) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      if (activeScanToken || movieRenamer.isBusy()) throw new Error("Wait for the scan or rename to finish before removing movies.");
+      const targets = database.listNoPosterNonAvIds(gentleUnlocked);
+      if (targets.length === 0) return { removed: [], failed: [], cancelled: false };
+      return removeMovieEntries(targets.map((target) => target.id), "library");
+    });
 const linkActressMovies = require("../services/actressMovies.cjs").createActressMovieLinker({ database, isGentleUnlocked: () => gentleUnlocked });
     ipcMain.handle("actress:linkMovies", async (event, name: string, ids: string[]) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Wait for the scan to finish before linking movies."); return linkActressMovies(name, ids); });
     let actressRescan: Promise<ActressMetadataRescanSummary> | undefined;
@@ -1183,6 +1212,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
       });
       if (!summary.cancelled) {
         database.appendScanHistory(summary);
+        for (const movie of database.listMovies({ includeGentle: gentleUnlocked, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
       }
       return summary;
     } finally {
@@ -1200,8 +1230,11 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     emitScanProgress({ stage: "preparing", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: "Whole-system scan: finding connected drives..." });
     try {
       const roots = await scanner.connectedDrives({ cancelToken: activeScanToken });
-      const summary = await scanner.scanWholeSystem(database, { roots, resolveLongPath: options?.resolveLongPath !== false, autoDownloadSubtitleFromSubtitleCat: Boolean(options?.autoDownloadSubtitleFromSubtitleCat), preferredSubtitleLanguage: options?.preferredSubtitleLanguage || "en", validateComplete: options?.importOnlyCompleteVideos !== false, autoConvertToMp4: Boolean(options?.autoConvertToMp4), autoResolveDuplicates: Boolean(options?.autoResolveDuplicates), mode, cancelToken: activeScanToken, onProgress: emitScanProgress, excludedPaths: [app.getPath("userData")] });
-      if (!summary.cancelled) database.appendScanHistory(summary);
+      const summary = await scanner.scanWholeSystem(database, { roots, resolveLongPath: options?.resolveLongPath !== false, autoDownloadSubtitleFromSubtitleCat: Boolean(options?.autoDownloadSubtitleFromSubtitleCat), preferredSubtitleLanguage: options?.preferredSubtitleLanguage || "en", validateComplete: options?.importOnlyCompleteVideos !== false, autoConvertToMp4: Boolean(options?.autoConvertToMp4), autoResolveDuplicates: Boolean(options?.autoResolveDuplicates), javOnly: options?.javOnly !== false, mode, cancelToken: activeScanToken, onProgress: emitScanProgress, excludedPaths: [app.getPath("userData")] });
+      if (!summary.cancelled) {
+        database.appendScanHistory(summary);
+        for (const movie of database.listMovies({ includeGentle: gentleUnlocked, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
+      }
       return summary;
     } catch (error) {
       emitScanProgress({ stage: "cancelled", mode, currentRoot: null, currentFile: null, processedFiles: 0, totalFiles: 0, imported: 0, skipped: 0, message: error instanceof Error ? error.message : "Whole-system scan stopped." });
@@ -1220,6 +1253,7 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
       });
       if (!summary.cancelled) {
         database.appendScanHistory(summary);
+        for (const movie of database.listMovies({ includeGentle: gentleUnlocked, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
       }
       return summary;
     } finally {
@@ -1238,6 +1272,11 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     canRename: () => !activeScanToken && !libraryMove.isBusy()
   });
   ipcMain.handle("movies:renameFile", movieRenamer.rename);
+
+  ipcMain.handle("movies:setDisplayName", async (_event, id: string, displayName: string) => {
+    database.setMovieDisplayName(id, typeof displayName === "string" ? displayName : "");
+    return true;
+  });
   ipcMain.handle("scan:cancel", () => {
     if (activeScanToken) {
       activeScanToken.cancelled = true;
@@ -1609,6 +1648,12 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
     return runSubtitleGeneration(movie, options);
   });
 
+  ipcMain.handle("processing:getState", (): MediaProcessingQueueState => mediaProcessingQueue.state());
+  ipcMain.handle("processing:enqueueMovie", (_event, movieId: string): MediaProcessingQueueState => {
+    mediaProcessingQueue.enqueueAutomatic(movieId);
+    return mediaProcessingQueue.state();
+  });
+
   ipcMain.handle("subtitle:getModelAvailability", async (_event, model: SubtitleGenerationOptions["model"]): Promise<SubtitleModelAvailability> => {
     return getSubtitleModelAvailability(model);
   });
@@ -1642,6 +1687,20 @@ app.whenReady().then(() => {
 
   const databasePath = path.join(app.getPath("userData"), "mla-plus.db");
   database = new DatabaseClient(databasePath);
+  mediaProcessingQueue = createMediaProcessingQueue(database, {
+    generateSubtitle: async (movieId, options) => {
+      const movie = database.getMovie(movieId);
+      if (!movie) return { ok: false, message: "Movie not found." };
+      const availability = await getSubtitleModelAvailability(options.model);
+      if (!availability.available) {
+        const download = await downloadSubtitleModel(options.model);
+        if (!download.ok) return { ok: false, message: download.message };
+      }
+      const result = await runSubtitleGeneration(movie, options);
+      return { ok: result.ok, message: result.message };
+    },
+    onChanged: (state) => mainWindow?.webContents.send("processing:changed", state)
+  });
   protocol.registerFileProtocol("mla-media", (request, callback) => {
     try {
       const parsed = new URL(request.url);
@@ -1664,6 +1723,7 @@ app.whenReady().then(() => {
     }
   });
   registerHandlers();
+  for (const movie of database.listMovies({ includeGentle: false, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
   createWindow();
 
   app.on("activate", () => {

@@ -3,6 +3,7 @@ import { GuardsChainSection } from "./GuardsChainCard";
 import type {
   AppShellState,
   MetadataSettings,
+  MovieLabelMode,
   OrganizationSettings,
   PlayerSettings,
   SubtitleGenerationModel,
@@ -40,6 +41,7 @@ interface SettingsPageProps {
   themeModeDraft: "dark" | "light";
   setThemeModeDraft: React.Dispatch<React.SetStateAction<"dark" | "light">>;
   onSaveThemeMode: () => Promise<void>;
+  onSaveMovieLabelMode: (mode: MovieLabelMode) => Promise<void>;
   organizationPreview: OrganizationPreview;
   onSaveOrganizationSettings: () => Promise<void>;
   applyOrganizationPreset: (preset: OrganizationSettings) => void;
@@ -74,6 +76,7 @@ export function SettingsPage({
   themeModeDraft,
   setThemeModeDraft,
   onSaveThemeMode,
+  onSaveMovieLabelMode,
   organizationPreview,
   onSaveOrganizationSettings,
   applyOrganizationPreset,
@@ -94,6 +97,10 @@ export function SettingsPage({
   const gentleShortcutInputId = "gentle-shortcut-key";
   const [gentleShortcutDraft, setGentleShortcutDraft] = useState("");
   const [gentleSaveStatus, setGentleSaveStatus] = useState<GentleSaveStatus | null>(null);
+  const [displayNameDraft, setDisplayNameDraft] = useState(appState.displayName);
+  const [displayNameSaved, setDisplayNameSaved] = useState(false);
+  const [movieLabelModeDraft, setMovieLabelModeDraft] = useState<MovieLabelMode>(appState.movieLabelMode);
+  const [movieLabelModeSaved, setMovieLabelModeSaved] = useState(false);
   const [subtitleModelStatuses, setSubtitleModelStatuses] = useState<SubtitleModelAvailability[]>([]);
   const [isRefreshingSubtitleModels, setIsRefreshingSubtitleModels] = useState(false);
 
@@ -138,6 +145,26 @@ export function SettingsPage({
       setGentleSaveStatus({ message: "Saved!", tone: "success" });
     } catch (e) {
       setGentleSaveStatus({ message: "Failed to save", tone: "error" });
+    }
+  };
+
+  const handleSaveDisplayName = async () => {
+    try {
+      await window.desktopApi.setDisplayName(displayNameDraft);
+      setDisplayNameSaved(true);
+      window.setTimeout(() => setDisplayNameSaved(false), 1800);
+    } catch {
+      setDisplayNameSaved(false);
+    }
+  };
+
+  const handleSaveMovieLabelMode = async () => {
+    try {
+      await onSaveMovieLabelMode(movieLabelModeDraft);
+      setMovieLabelModeSaved(true);
+      window.setTimeout(() => setMovieLabelModeSaved(false), 1800);
+    } catch {
+      setMovieLabelModeSaved(false);
     }
   };
   return (
@@ -619,7 +646,44 @@ export function SettingsPage({
               />
               <span>Use light theme</span>
             </label>
+            <label className="form-field">
+              <span>Display name</span>
+              <input
+                className="search-input"
+                maxLength={60}
+                onChange={(event) => setDisplayNameDraft(event.target.value)}
+                placeholder="Shown in the top bar"
+                type="text"
+                value={displayNameDraft}
+              />
+            </label>
+            <label className="form-field">
+              <span>Movie tile labels</span>
+              <select
+                className="search-input"
+                onChange={(event) => setMovieLabelModeDraft(event.target.value as MovieLabelMode)}
+                value={movieLabelModeDraft}
+              >
+                <option value="display-name">Display name, then title</option>
+                <option value="title">Metadata title</option>
+                <option value="filename">Source filename</option>
+              </select>
+            </label>
             <div className="inline-actions">
+              <button
+                className="primary-button"
+                onClick={() => void handleSaveDisplayName()}
+                type="button"
+              >
+                {displayNameSaved ? "Saved!" : "Save display name"}
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void handleSaveMovieLabelMode()}
+                type="button"
+              >
+                {movieLabelModeSaved ? "Saved!" : "Save movie labels"}
+              </button>
               <button
                 className="primary-button"
                 onClick={() => void onSaveThemeMode()}
@@ -639,7 +703,7 @@ export function SettingsPage({
             <label>
               Default volume ({Math.round(playerSettings.defaultVolume * 100)}%)
               <input
-                type="range" min={0} max={1} step={0.05}
+                type="range" min={0} max={3} step={0.05}
                 value={playerSettings.defaultVolume}
                 onChange={(e) =>
                   setPlayerSettings((s) => ({ ...s, defaultVolume: Number(e.target.value) }))

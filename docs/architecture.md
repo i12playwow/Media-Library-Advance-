@@ -30,28 +30,30 @@ this table):
 
 | Prefix | Owns | Channels |
 |---|---|---|
-| `settings:*` | preferences and metadata/organization settings | `settings:getGentleShortcut`, `settings:setGentleShortcut`, `settings:verifyGentlePin`, `settings:getThemeMode`, `settings:setThemeMode`, `settings:saveMetadata`, `settings:saveOrganization`, `settings:pickLibraryFolder` |
+| `settings:*` | preferences and metadata/organization settings | `settings:getGentleShortcut`, `settings:setGentleShortcut`, `settings:verifyGentlePin`, `settings:getThemeMode`, `settings:setThemeMode`, `settings:saveMetadata`, `settings:saveOrganization`, `settings:pickLibraryFolder`, `settings:setDisplayName`, `settings:setMovieLabelMode` |
 | `gentle:*` | gentle mode state changes | `gentle:toggle` (invoke), `gentle:unlockResult` (push) |
 | `auth:*` | the same gentle gate, named for who may call it | `auth:unlockGentle` (PIN), `auth:toggleGentle` (shortcut) |
 | `app:*` | whole-shell snapshot and browser launch | `app:getState`, `app:openBrowser` |
-| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:summary`, `movies:remove`, `movies:scanWholeSystem`, `movies:selectModeIds`, `movies:count`, `movies:modeCounts`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode`, `movies:renameFile` |
+| `movies:*` | the library itself | `movies:list`, `movies:listAll`, `movies:summary`, `movies:remove`, `movies:scanWholeSystem`, `movies:selectModeIds`, `movies:count`, `movies:modeCounts`, `movies:pickScan`, `movies:scan`, `movies:addFiles`, `movies:ensurePosters`, `movies:refreshPosters`, `movies:backfillPosters`, `movies:moveMode`, `movies:batchMoveMode`, `movies:renameFile`, `movies:setDisplayName`, `movies:removeNoPosterNonAv` |
 | `scan:*` | scan lifecycle | `scan:cancel` (invoke), `scan:progress` (push) |
 | `library:*` | library roots | `library:addRoot` |
 | `shell:*` | OS integration | `shell:openFile`, `shell:showInFolder` |
 | `actress:*` | actress photos, regions, and metadata | `actress:getPhotos`, `actress:linkMovies`, `actress:rescanMetadata`, `actress:getRegions`, `actress:getRegion`, `actress:refreshPhotos`, `actress:removePhoto`, `actress:listPhotos`, `actress:setPrimaryPhoto`, `actress:setRegion`, `actress:setPhoto` |
-| `player:*` | playback | `player:openWindow`, `player:getWindowMovie`, `player:windowMovie` (push), `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4` |
+| `player:*` | playback | `player:openWindow`, `player:getWindowMovie`, `player:windowMovie` (push), `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4`, `player:setFrameless`, `player:windowAction` |
 | `subtitle:*` | subtitle generation and local subtitle directories | `subtitle:addDir`, `subtitle:removeDir`, `subtitle:scan`, `subtitle:generateForMovie`, `subtitle:getModelAvailability`, `subtitle:downloadModel`, `subtitle:previewOutput`, `subtitle:modelDownloadProgress` (push) |
+| `processing:*` | automatic MP4 conversion and subtitle-generation queue | `processing:getState`, `processing:enqueueMovie`, `processing:changed` (push) |
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
 | `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-13 prefixes, 67 invoke channels (one `ipcMain.handle` each, all in main.ts),
-4 push channels (one `webContents.send` each, all in main.ts, subscribed via
+14 prefixes, 75 invoke channels (one `ipcMain.handle` each, all in main.ts),
+5 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
-`onSubtitleModelDownloadProgress`, and `onPlayerWindowMovie`).
+`onSubtitleModelDownloadProgress`, `onProcessingChanged`, and
+`onPlayerWindowMovie`).
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 67 invoke channels has a
+- **Every named channel is real.** Each of the 75 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`

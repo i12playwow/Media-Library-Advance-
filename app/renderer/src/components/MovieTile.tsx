@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { MovieRecord } from "../../../shared/contracts";
+import type { MovieLabelMode, MovieRecord } from "../../../shared/contracts";
 import { PosterVisual } from "./PosterVisual";
 
 interface MovieTileProps {
@@ -13,6 +13,7 @@ interface MovieTileProps {
   /** Quick-play overlay button. When provided, a play icon appears on the poster. */
   onPlay?: () => void;
   separator?: "dash" | "dot";
+  labelMode?: MovieLabelMode;
 }
 
 function MovieTileComponent({
@@ -25,8 +26,16 @@ function MovieTileComponent({
   onToggleSelect,
   onPlay,
   separator = "dash",
+  labelMode = "display-name",
 }: MovieTileProps) {
   const sep = separator === "dot" ? " · " : " - ";
+  const sourceFileName = movie.sourcePath.split(/[\\/]/).pop() ?? movie.sourcePath;
+  const fileName = sourceFileName.replace(/\.[^.]+$/, "") || sourceFileName;
+  const label = labelMode === "filename"
+    ? fileName
+    : labelMode === "title"
+      ? movie.title
+      : movie.displayName?.trim() || movie.title;
   return (
     <article
       className={[
@@ -76,7 +85,7 @@ function MovieTileComponent({
         )}
         <div className="poster-content">
           <span className="mode-pill" data-library-mode={movie.libraryMode}><span className={`mode-icon mode-icon-${movie.libraryMode}`} aria-hidden="true" />{movie.libraryMode === "gentle" ? "Gentle" : "Normal"}</span>
-          <strong>{movie.title}</strong>
+          <strong>{label}</strong>
           <small>
             {movie.year ?? "Unknown year"}{sep}{movie.resolution}
           </small>
@@ -93,6 +102,7 @@ export const MovieTile = memo(MovieTileComponent, (prev, next) => {
   return (
     prev.movie.id === next.movie.id &&
     prev.movie.title === next.movie.title &&
+    prev.movie.displayName === next.movie.displayName &&
     prev.movie.posterUrl === next.movie.posterUrl &&
     prev.movie.posterSource === next.movie.posterSource &&
     prev.movie.year === next.movie.year &&
@@ -103,6 +113,7 @@ export const MovieTile = memo(MovieTileComponent, (prev, next) => {
     prev.isActive === next.isActive &&
     prev.isSelected === next.isSelected &&
     prev.showCheckbox === next.showCheckbox &&
-    prev.separator === next.separator
+    prev.separator === next.separator &&
+    prev.labelMode === next.labelMode
   );
 });

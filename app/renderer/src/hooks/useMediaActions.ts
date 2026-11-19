@@ -14,6 +14,7 @@ interface UseMediaActionsProps {
   playerSettings: PlayerSettings;
   refreshMovies: (query?: string) => Promise<void>;
   refreshPostersOnly: () => Promise<void>;
+  setMovies?: Dispatch<SetStateAction<MovieRecord[]>>;
   setActressPhotos: Dispatch<SetStateAction<Record<string, string>>>;
   setAllMoviesPool: Dispatch<SetStateAction<MovieRecord[]>>;
   setStatusMessage: (msg: string) => void;
@@ -30,6 +31,7 @@ export function useMediaActions({
   playerSettings,
   refreshMovies,
   refreshPostersOnly,
+  setMovies,
   setActressPhotos,
   setAllMoviesPool,
   setStatusMessage,
@@ -79,11 +81,20 @@ export function useMediaActions({
     setStatusMessage(
       `Regenerating posters for ${targetIds.length} selected title${targetIds.length === 1 ? "" : "s"}...`
     );
+    // Clear the affected posters immediately so the tiles show the fallback
+    // and the change is visible even when regeneration returns the same URL.
+    const targetIdSet = new Set(targetIds);
+    setMovies?.((current) =>
+      current.map((movie) =>
+        targetIdSet.has(movie.id) ? { ...movie, posterUrl: null } : movie
+      )
+    );
     try {
       const summary = await desktopApi.refreshMoviePosters(targetIds);
-      if (summary.updated > 0) await refreshPostersOnly();
+      await refreshPostersOnly();
       setStatusMessage(buildPosterRefreshMessage(summary));
     } catch (error) {
+      await refreshPostersOnly();
       setStatusMessage(
         error instanceof Error ? error.message : "Poster regeneration failed unexpectedly."
       );

@@ -42,8 +42,9 @@ skip this table, the lint sends you back here.
 | `updateMovieLocation` | `UPDATE movies SET source_path, folder_path, library_mode, updated_at` | `source_path` | `folder_path` and `library_mode` are filters, not searched text |
 | `updateMoviePoster` | `UPDATE movies SET poster_url, poster_source, updated_at` | none | posters are deliberately invisible to the search clause; `poster_source` carries the specific web source (`javdatabase`/`javbus`/`imdb`/`tmdb`, legacy `web`, or `local`) so the UI can attribute each cover |
 | `updateMovieVideoId` | `UPDATE movies SET video_id, updated_at` | `video_id` | metadataService's ID-correction path |
+| `setMovieDisplayName` | `UPDATE movies SET display_name, updated_at` | none | per-video display-name override; a blank name is stored as `NULL` so the tile falls back to the original title |
 
-That is the complete set: six methods, one insert, four updates, one
+That is the complete set: seven methods, one insert, five updates, one
 delete-pair. The remaining `UPDATE`/`DELETE` statements in database.ts touch
 other tables (`subtitles`, `settings`, `actress_*`) and are out of this
 table's scope — the lint keys on `movies`-table statements specifically.
@@ -66,8 +67,9 @@ and how it relates to search.
 | `getMovie` | `SELECT * FROM movies WHERE id = ?` | none by clause | single-row detail lookup |
 | `findMovieIdBySourcePath` | `SELECT id FROM movies WHERE source_path = ?` | `source_path`, exact match (no `LIKE`) | the dedupe/duplicate-check path |
 | `getMovieByVideoId` | `SELECT id, title FROM movies WHERE LOWER(video_id) = LOWER(?)` | `video_id`, case-folded exact match | metadata import's id lookup |
+| `listNoPosterNonAvIds` | `SELECT id, title, source_path FROM movies WHERE (poster_url IS NULL OR poster_url = '') AND video_id IS NULL` (+ optional `library_mode = 'normal'`) | `title` is fetched, but filtered on poster/video_id/mode, not searched text | poster regeneration's candidate list for non-AV entries |
 
-That is the complete set: six readers — three clause-builders, two
+That is the complete set: seven readers — three clause-builders, three
 single-purpose lookups, one id/title pair-fetch. `deleteMovie` also contains
 the string `FROM movies`, but as a `DELETE` — a write-path row, not a read.
 Any new `FROM movies` or `JOIN movies` statement in database.ts — class

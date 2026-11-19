@@ -10,6 +10,7 @@ import type {
   MovieRecord,
   OnlineSubtitleResult,
   OrganizationSettings,
+  MovieLabelMode,
   PlaybackCheckpoint,
   PlayerSettings,
   PosterBackfillSummary,
@@ -22,7 +23,8 @@ import type {
   SubtitleGenerationOptions,
   SubtitleGenerationPreview,
   SubtitleGenerationResult,
-  SubtitleScanResult
+  SubtitleScanResult,
+  MediaProcessingQueueState
 } from "../../shared/contracts";
 
 declare global {
@@ -34,6 +36,8 @@ declare global {
       verifyGentlePin: (pin: string) => Promise<{ ok: boolean; message: string }>;
       getThemeMode: () => Promise<"dark" | "light">;
       setThemeMode: (themeMode: "dark" | "light") => Promise<AppShellState>;
+      setDisplayName: (name: string) => Promise<AppShellState>;
+      setMovieLabelMode: (mode: MovieLabelMode) => Promise<AppShellState>;
       getAppState: () => Promise<AppShellState>;
       openBrowser?: () => Promise<void>;
       getGuardsChainState: () => Promise<GuardsChainState>;
@@ -54,7 +58,8 @@ declare global {
       librarySummary: () => Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }>;
       scanWholeSystem: (options: ScanAutomationOptions) => Promise<ScanSummary>;
       selectMovieModeIds: (mode: LibraryMode) => Promise<string[]>;
-      removeMovies: (ids: string[], action: "library" | "trash") => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
+      removeMovies: (ids: string[], action: "library" | "trash" | "delete-permanently") => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
+      removeNoPosterNonAvMovies: () => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
       listAllMovies: () => Promise<MovieRecord[]>;
       ensureMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
       refreshMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
@@ -63,6 +68,7 @@ declare global {
       cancelScan: () => Promise<void>;
       addLibraryRoot: (mode: LibraryMode) => Promise<AppShellState>;
       renameMovieFile: (id: string, action: "rename" | "move" | "javdatabase") => Promise<{ changed: boolean; fileName?: string }>;
+      setMovieDisplayName: (id: string, displayName: string) => Promise<boolean>;
       moveMovie: (movieId: string, mode: LibraryMode) => Promise<LibraryMoveResult>;
       moveMovies: (movieIds: string[], mode: LibraryMode) => Promise<LibraryMoveResult>;
       unlockGentle: (pin: string) => Promise<{ ok: boolean; message: string }>;
@@ -81,6 +87,8 @@ declare global {
       playerInstallSubtitle: (movieId: string, language: string, content: string) => Promise<string>;
       openPlayerWindow: (id?: string | null) => Promise<{ok:boolean}>;
       getPlayerWindowMovie: () => Promise<MovieRecord | null>;
+      setPlayerFrameless: (frameless: boolean) => Promise<{ ok: boolean }>;
+      playerWindowAction: (action: "minimize" | "maximize" | "close") => Promise<{ ok: boolean; maximized: boolean }>;
       onPlayerWindowMovie: (callback: (movie: MovieRecord | null) => void) => () => void;
       playerGetSettings: () => Promise<PlayerSettings>;
       playerSaveSettings: (settings: PlayerSettings) => Promise<PlayerSettings>;
@@ -101,6 +109,9 @@ declare global {
       downloadSubtitleModel: (model: SubtitleGenerationOptions["model"]) => Promise<SubtitleModelDownloadResult>;
       onSubtitleModelDownloadProgress: (handler: (progress: SubtitleModelDownloadProgress) => void) => () => void;
       previewSubtitleOutput: (movieId: string, options: SubtitleGenerationOptions) => Promise<SubtitleGenerationPreview>;
+      processingGetState: () => Promise<MediaProcessingQueueState>;
+      processingEnqueueMovie: (movieId: string) => Promise<MediaProcessingQueueState>;
+      onProcessingChanged: (handler: (state: MediaProcessingQueueState) => void) => () => void;
     };
   }
 }

@@ -43,6 +43,10 @@ interface ImdbSuggestionResponse {
 
 export interface OnlineMovieMetadata {
   pageTitle?: string;
+  /** Proper movie title resolved from the online source, cleaned of site
+   *  branding and video-ID prefixes. When present, the scanner uses this
+   *  instead of the raw filename-parsed title for file/folder naming. */
+  resolvedTitle?: string;
   actresses: string[];
   modelName: string | null;
   posterUrl: string | null;
@@ -127,8 +131,10 @@ export async function enrichMoviePoster(
       resolvedPosterUrl = localPosterUrl;
     }
   }
-
-  const webMetadata = await fetchPosterUrlForMovie(movieWithResolvedId, settings, options);
+  const webMetadata = await fetchPosterUrlForMovie(movieWithResolvedId, settings, {
+    ...options,
+    bypassCache: options?.forceRefresh
+  });
   if (!webMetadata?.posterUrl) {
     return resolvedPosterUrl ?? null;
   }
@@ -144,6 +150,7 @@ async function extractLocalPoster(
   options?: {
     onProgress?: (progress: ScanProgress) => void;
     progress?: ScanProgress;
+    forceRefresh?: boolean;
   }
 ): Promise<string | null> {
   const posterPath = buildLocalPosterPath(movie);
@@ -153,11 +160,21 @@ async function extractLocalPoster(
     message: `Generating local poster for ${movie.title}`
   });
 
-  try {
-    await fs.access(posterPath);
-    return await readPosterAsDataUrl(posterPath);
-  } catch {
-    // Fall through and generate a new frame capture.
+  // Regeneration must produce a visibly new frame: drop the old capture
+  // instead of re-reading the same stale file.
+  if (options?.forceRefresh) {
+    try {
+      await fs.unlink(posterPath);
+    } catch {
+      // No existing poster — nothing to remove.
+    }
+  } else {
+    try {
+      await fs.access(posterPath);
+      return await readPosterAsDataUrl(posterPath);
+    } catch {
+      // Fall through and generate a new frame capture.
+    }
   }
 
   try {
@@ -193,6 +210,7 @@ async function fetchPosterUrlForMovie(
   options?: {
     onProgress?: (progress: ScanProgress) => void;
     progress?: ScanProgress;
+    bypassCache?: boolean;
   }
 ): Promise<OnlineMovieMetadata | null> {
   if (!settings.autoFetchWebPosters) {
@@ -270,6 +288,7 @@ async function fetchTmdbMovieMetadata(
     modelName: null,
     posterUrl: `${baseUrl}${bestMatch.poster_path}`,
     source: "tmdb",
+    resolvedTitle: bestMatch.title,
     videoId: movie.videoId ?? null
   };
 }
@@ -423,13 +442,25 @@ export async function resolveOnlineMovieMetadata(
   options?: {
     onProgress?: (progress: ScanProgress) => void;
     progress?: ScanProgress;
+    bypassCache?: boolean;
   }
 ): Promise<OnlineMovieMetadata | null> {
   const resolvedVideoId = resolveMovieVideoId(movie);
   const profile = settings.sourceProfile ?? "auto";
   const cacheKey = buildMetadataCacheKey(movie, settings, profile, resolvedVideoId);
-  if (onlineMovieMetadataCache.has(cacheKey)) {
+  // Regeneration must actually retry: a cached null (from an earlier network
+  // hiccup or provider outage) would otherwise make every refresh a no-op.
+  if (!options?.bypassCache && onlineMovieMetadataCache.has(cacheKey)) {
     return onlineMovieMetadataCache.get(cacheKey) ?? null;
+  }
+  if (options?.bypassCache) {
+    onlineMovieMetadataCache.delete(cacheKey);
+    // Also clear the per-ID lookup cache so JAV site misses retry too.
+    if (resolvedVideoId) {
+      for (const candidate of expandVideoIdLookupCandidates(resolvedVideoId)) {
+        onlineMovieMetadataCache.delete(candidate.toUpperCase());
+      }
+    }
   }
 
   const strategyOrder = resolveMetadataStrategyOrder(profile, Boolean(resolvedVideoId));
@@ -699,11 +730,13 @@ async function fetchJavDbMetadata(videoId: string): Promise<OnlineMovieMetadata 
         if (!posterMatch?.[1]) {
           continue;
         }
+        const titleMatch = html.match(/property="og:title"\s+content="([^"]+)"/i) ?? html.match(/<title>([^<]+)<\/title>/i);
         return {
           actresses: [],
           modelName: candidate.split("-")[0] ?? null,
           posterUrl: posterMatch[1],
           source: "javdb",
+          resolvedTitle: cleanJavDbTitle(titleMatch?.[1] ?? "", candidate),
           videoId: candidate
         };
       } catch (error) {
@@ -733,11 +766,13 @@ async function fetchJavBusMetadata(videoId: string): Promise<OnlineMovieMetadata
     }
     const html = await response.text();
     const posterMatch = html.match(/property="og:image"\s+content="([^"]+)"/i);
+    const titleMatch = html.match(/property="og:title"\s+content="([^"]+)"/i) ?? html.match(/<title>([^<]+)<\/title>/i);
     return {
       actresses: [],
       modelName: videoId.split("-")[0] ?? null,
       posterUrl: posterMatch?.[1] ?? null,
       source: "javbus",
+      resolvedTitle: cleanJavDbTitle(titleMatch?.[1] ?? "", videoId),
       videoId
     };
   } catch (error) {
@@ -831,6 +866,7 @@ async function fetchImdbMovieMetadata(
     modelName: null,
     posterUrl: best.result.i!.imageUrl!,
     source: "imdb",
+    resolvedTitle: best.result.l,
     videoId: movie.videoId ?? null
   };
 }
@@ -867,6 +903,7 @@ export async function fetchJavDatabaseMetadata(
     posterUrl: posterMatch?.[1] ?? null,
     source: "javdatabase",
     pageTitle: titleMatch?.[1],
+    resolvedTitle: cleanJavDatabaseTitle(titleMatch?.[1] ?? "", videoId),
     videoId
   };
 }
@@ -899,6 +936,65 @@ function parseActressesFromDocumentTitle(
     .map((actress) => actress.trim())
     .filter(Boolean)
     .filter((actress) => !/jav database/i.test(actress));
+}
+
+/** Extract a clean movie title from a JAVDatabase <title> tag.
+ *  Page titles look like: "IPX-787 Actress Name - JAV Database"
+ *  or "Actress Name - IPX-787 - JAV Database". We strip the site
+ *  branding, the video ID, and the actress names to isolate the
+ *  descriptive title segment. If no descriptive segment is found
+ *  (some pages only have ID + actress), returns the video ID as
+ *  the title fallback. */
+function cleanJavDatabaseTitle(documentTitle: string, videoId: string): string | undefined {
+  if (!documentTitle) return undefined;
+
+  const withoutSite = documentTitle
+    .replace(/\s*-\s*JAV Database\s*$/i, "")
+    .replace(/\s*\|\s*JAV Database\s*$/i, "")
+    .trim();
+
+  const segments = withoutSite.split(/\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+  if (segments.length === 0) return undefined;
+
+  // Remove segments that are just the video ID or just actress names
+  const idUpper = videoId.toUpperCase();
+  const filtered = segments.filter(
+    (seg) =>
+      seg.toUpperCase() !== idUpper &&
+      !/^[\w\s,]+$/.test(seg) // skip pure-name segments (no descriptive words)
+  );
+
+  // If we have descriptive segments left, use the first one
+  if (filtered.length > 0) return filtered[0];
+
+  // Fallback: if only ID + actress segments, construct "ID Actress" as title
+  const nonIdSegments = segments.filter((seg) => seg.toUpperCase() !== idUpper);
+  if (nonIdSegments.length > 0) {
+    return `${videoId} ${nonIdSegments.join(" ")}`;
+  }
+
+  return videoId || undefined;
+}
+
+/** Clean a JavDB page title into a movie title.
+ *  JavDB og:title / <title> typically looks like "IPX-787 - Title" or
+ *  "JavDB - IPX-787 - Title". Strip the site name and video ID prefix. */
+function cleanJavDbTitle(documentTitle: string, videoId: string): string | undefined {
+  if (!documentTitle) return undefined;
+
+  let cleaned = documentTitle
+    .replace(/^JavDB\s*[-|]\s*/i, "")
+    .replace(/\s*[-|]\s*JavDB\s*$/i, "")
+    .trim();
+
+  const idUpper = videoId.toUpperCase();
+  cleaned = cleaned.replace(new RegExp(`\\b${idUpper.replace(/-/g, "[- ]?")}\\b`, "i"), "").trim();
+
+  // Remove leading/trailing separators left after ID removal
+  cleaned = cleaned.replace(/^[-|:\s]+/, "").replace(/[-|:\s]+$/, "").trim();
+
+  if (cleaned.length < 2) return undefined;
+  return cleaned;
 }
 
 function normalize(value: string): string {

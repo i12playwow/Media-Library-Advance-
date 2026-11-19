@@ -134,3 +134,6 @@ github-billing-support-ticket.md
 
 # Local verified recovery copies and reports
 recovery-output/
+
+# WorkBuddy AI local session data (agent memory, not project code)
+.workbuddy-ai/

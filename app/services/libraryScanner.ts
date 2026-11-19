@@ -98,7 +98,9 @@ export const DEFAULT_SCAN_OPTIONS: ScanAutomationOptions = {
   autoDownloadSubtitleFromSubtitleCat: true,
   preferredSubtitleLanguage: "zh-hans",
   addToNormalModeLibrary: true,
-  addToGentleModeLibrary: false
+  addToGentleModeLibrary: false,
+  javOnly: true,
+  autoMetadataRename: true
 };
 
 export interface CancelToken {
@@ -178,7 +180,7 @@ export async function scanLibraries(
         for (let offset = 0; offset < videoFiles.length; offset += 16) {
           if (cancelToken?.cancelled) break;
           const batch = videoFiles.slice(offset, offset + 16).filter((videoFile) => {
-            if (!scanOptions.renameOnly && !isJavMoviePath(videoFile)) { skipped++; return false; }
+            if (!scanOptions.renameOnly && scanOptions.javOnly !== false && !isJavMoviePath(videoFile)) { skipped++; return false; }
             const resolved = path.resolve(videoFile);
             const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
             if (discoveredPaths.has(key)) return false;
@@ -341,12 +343,22 @@ export async function scanLibraries(
         void enrichActressPhotos(database, actresses);
       }
 
+      // When autoMetadataRename is on and we got online metadata with a title,
+      // use that title for file/folder naming instead of the raw filename parse.
+      // NFO title is used as a secondary fallback (local metadata).
+      const metadataTitle = onlineMetadata?.resolvedTitle?.trim() || null;
+      const nfoTitle = nfoData.title?.trim() || null;
+      const useMetadataRename = scanOptions.autoMetadataRename !== false && scanOptions.moveRename;
+      const resolvedTitle = useMetadataRename
+        ? (metadataTitle || nfoTitle || candidate.parsed.title)
+        : candidate.parsed.title;
+
       const processed = await withMutationLock(() =>
         applyProcessingOptions({
           libraryMode: candidate.mode,
           root: candidate.root,
           videoPath: candidate.videoFile,
-          title: candidate.parsed.title,
+          title: resolvedTitle,
           year: candidate.parsed.year ?? nfoData.year ?? null,
           videoId: resolvedVideoId ?? "",
           actresses,
@@ -374,7 +386,7 @@ export async function scanLibraries(
 
         database.upsertMovie({
           id: movieId,
-          title: candidate.parsed.title,
+          title: resolvedTitle,
           year: candidate.parsed.year,
           videoId: resolvedVideoId,
           sourcePath: processed.videoPath,
@@ -715,9 +727,10 @@ async function applyProcessingOptions(params: {
   // placement modes: organized scans name the file from the library template,
   // in-place scans name it after the video file so the next rescan's
   // auto-match finds it instead of downloading again.
+  // Works with or without a video ID — the title is used as a fallback query.
   if (
     params.scanOptions.autoDownloadSubtitleFromSubtitleCat &&
-    params.videoId &&
+    (params.videoId || params.title.trim().length >= 3) &&
     currentSubtitles.length === 0
   ) {
     try {
@@ -725,7 +738,7 @@ async function applyProcessingOptions(params: {
         directory: currentFolderPath,
         title: params.title,
         year: params.year,
-        videoId: params.videoId,
+        videoId: params.videoId ?? "",
         actresses: params.actresses,
         modelName: params.modelName,
         preferredLanguage: params.scanOptions.preferredSubtitleLanguage,

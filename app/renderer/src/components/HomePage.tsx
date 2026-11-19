@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AppShellState, MovieRecord, ScanSummary } from "../../../shared/contracts";
+import type { AppShellState, MediaProcessingQueueState, MovieRecord, ScanSummary } from "../../../shared/contracts";
 import { SamplePosterCard } from "./SamplePosterCard";
 
 const popularSamples = [
@@ -15,9 +15,10 @@ interface HomePageProps {
   movies: MovieRecord[];
   appState: AppShellState;
   lastScanSummary: ScanSummary | null;
+  processingQueue?: MediaProcessingQueueState;
 }
 
-export function HomePage({ movies, appState, lastScanSummary }: HomePageProps) {
+export function HomePage({ movies, appState, lastScanSummary, processingQueue }: HomePageProps) {
   const libraryCount = movies.length;
   const gentleCount = appState.gentleUnlocked ? appState.roots.gentle.length : 0;
   const recentScans = appState.scanHistory.length > 0
@@ -27,6 +28,12 @@ export function HomePage({ movies, appState, lastScanSummary }: HomePageProps) {
       : [];
   const latestScan = recentScans[0]?.summary ?? null;
   const subtitleSearchLogs = latestScan?.subtitleSearchLogs ?? [];
+  const visibleQueueJobs = processingQueue?.jobs.filter((job) => job.status === "queued" || job.status === "running" || job.status === "failed") ?? [];
+  const conversionJobs = visibleQueueJobs.filter((job) => job.kind === "convert-mp4");
+  const subtitleJobs = visibleQueueJobs.filter((job) => job.kind === "generate-subtitle");
+  const activeConversionJobs = conversionJobs.filter((job) => job.status !== "failed");
+  const activeSubtitleJobs = subtitleJobs.filter((job) => job.status !== "failed");
+  const failedCount = visibleQueueJobs.filter((job) => job.status === "failed").length;
   const [copiedLogs, setCopiedLogs] = useState(false);
 
   async function handleCopySubtitleLogs(): Promise<void> {
@@ -105,6 +112,69 @@ export function HomePage({ movies, appState, lastScanSummary }: HomePageProps) {
           </div>
         </article>
       </section>
+
+      {processingQueue && visibleQueueJobs.length > 0 && (
+        <div className="processing-monitor-panels">
+          <section className="panel processing-monitor-compact" aria-label="Video conversion monitor">
+            <div className="processing-monitor-summary">
+              <div>
+                <p className="eyebrow">Realtime monitor</p>
+                <strong>Video conversion</strong>
+              </div>
+              <span className="processing-monitor-count"><strong>{activeConversionJobs.length}</strong> active</span>
+            </div>
+            <div className="processing-monitor-jobs">
+              {(conversionJobs.length > 0 ? conversionJobs : visibleQueueJobs).slice(0, 3).map((job) => (
+                <div className="processing-monitor-job" key={job.id}>
+                  <span className={`processing-job-kind ${job.kind}`}>MP4</span>
+                  <strong title={job.movieTitle}>{job.movieTitle}</strong>
+                  <span>{job.status === "failed" ? job.error || job.message : `${job.status} · ${Math.round(job.progress)}% · ${job.message}`}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel processing-monitor-compact" aria-label="Subtitle generation monitor">
+            <div className="processing-monitor-summary">
+              <div>
+                <p className="eyebrow">Realtime monitor</p>
+                <strong>Subtitles</strong>
+              </div>
+              <span className="processing-monitor-count"><strong>{activeSubtitleJobs.length}</strong> active</span>
+            </div>
+            <div className="processing-monitor-jobs">
+              {(subtitleJobs.length > 0 ? subtitleJobs : visibleQueueJobs).slice(0, 3).map((job) => (
+                <div className="processing-monitor-job" key={job.id}>
+                  <span className={`processing-job-kind ${job.kind}`}>SUB</span>
+                  <strong title={job.movieTitle}>{job.movieTitle}</strong>
+                  <span>{job.status === "failed" ? job.error || job.message : `${job.status} · ${Math.round(job.progress)}% · ${job.message}`}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {failedCount > 0 && (
+            <section className="panel processing-monitor-compact processing-monitor-failed-panel" aria-label="Failed media jobs">
+              <div className="processing-monitor-summary">
+                <div>
+                  <p className="eyebrow">Realtime monitor</p>
+                  <strong>Failed jobs</strong>
+                </div>
+                <span className="processing-monitor-count processing-monitor-failed"><strong>{failedCount}</strong> failed</span>
+              </div>
+              <div className="processing-monitor-jobs">
+                {visibleQueueJobs.filter((job) => job.status === "failed").slice(0, 3).map((job) => (
+                  <div className="processing-monitor-job" key={job.id}>
+                    <span className={`processing-job-kind ${job.kind}`}>{job.kind === "convert-mp4" ? "MP4" : "SUB"}</span>
+                    <strong title={job.movieTitle}>{job.movieTitle}</strong>
+                    <span>{job.error || job.message}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
 
       {recentScans.length > 0 && (
         <section className="panel home-panel">

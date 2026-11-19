@@ -821,6 +821,11 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     fragments: ["UPDATE movies SET video_id = ?, updated_at = ? WHERE id = ?"],
     exact: ["UPDATE movies SET video_id = ?, updated_at = ? WHERE id = ?"],
   },
+  {
+    method: "setMovieDisplayName",
+    fragments: ["UPDATE movies SET display_name = ?, updated_at = ? WHERE id = ?"],
+    exact: ["UPDATE movies SET display_name = ?, updated_at = ? WHERE id = ?"],
+  },
 ];
 
 // ── unit slicing shared by drift class 4's write- and read-side checks ─────
@@ -953,6 +958,19 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
     method: "getMovieByVideoId",
     fragments: ["SELECT id, title FROM movies WHERE LOWER(video_id) = LOWER(?)"],
     exact: ["SELECT id, title FROM movies WHERE LOWER(video_id) = LOWER(?)"],
+  },
+  {
+    method: "listNoPosterNonAvIds",
+    fragments: [
+      "SELECT id, title, source_path FROM movies WHERE ${clauses.join(\" AND \")}"
+    ],
+    exact: [
+      "(poster_url IS NULL OR poster_url = '')",
+      "video_id IS NULL",
+      "library_mode = 'normal'",
+      " AND ",
+      "SELECT id, title, source_path FROM movies WHERE ${clauses.join(\" AND \")}"
+    ],
   },
 ];
 

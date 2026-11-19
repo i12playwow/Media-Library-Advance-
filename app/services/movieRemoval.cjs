@@ -1,9 +1,9 @@
 'use strict';
-function createMovieRemover({ database, confirm, trash, stat = require("node:fs/promises").lstat, isGentleUnlocked = () => false }) {
+function createMovieRemover({ database, confirm, trash, deletePermanently, stat = require("node:fs/promises").lstat, isGentleUnlocked = () => false }) {
   let busy = false;
   return async function removeMovies(ids, action) {
     if (!Array.isArray(ids) || !ids.length || ids.length > 10000 || ids.some(id => typeof id !== 'string' || !id || id.length > 512)) throw new Error('Choose one or more movies to remove.');
-    if (!['library','trash'].includes(action)) throw new Error('Choose a removal action.');
+    if (!['library','trash','delete-permanently'].includes(action)) throw new Error('Choose a removal action.');
     if (busy) throw new Error('Another removal is already in progress.');
     busy = true;
     const removed = [], failed = [], movies = [];
@@ -15,11 +15,13 @@ function createMovieRemover({ database, confirm, trash, stat = require("node:fs/
         movies.push(movie);
       }
       if (!movies.length) return { removed, failed, cancelled: false };
+      const isPermanent = action === 'delete-permanently';
+      const isFileAction = action === 'trash' || isPermanent;
       const approved = await confirm({
-        title: action === 'trash' ? 'Remove video files' : 'Remove from library',
-        message: action === 'trash' ? `Move ${movies.length} selected video file(s) to the Recycle Bin and remove their library entries?` : `Remove ${movies.length} selected movie(s) from the library?`,
-        detail: movies.slice(0,10).map(movie => movie.title + '\n' + movie.sourcePath).join('\n\n') + (movies.length > 10 ? `\n\n…and ${movies.length - 10} more selected movies.` : '') + '\n\n' + (action === 'trash' ? 'Only video files are moved. Subtitles, posters, and other files stay on disk. If recycling fails, that movie stays in the library.' : 'All video files, subtitles, and posters stay on disk. A future scan may add these movies again.'),
-        button: action === 'trash' ? 'Move videos to Recycle Bin' : 'Remove library entries'
+        title: isPermanent ? 'Delete video files permanently' : action === 'trash' ? 'Remove video files' : 'Remove from library',
+        message: isPermanent ? `Permanently delete ${movies.length} selected video file(s) and remove their library entries? This cannot be undone.` : action === 'trash' ? `Move ${movies.length} selected video file(s) to the Recycle Bin and remove their library entries?` : `Remove ${movies.length} selected movie(s) from the library?`,
+        detail: movies.slice(0,10).map(movie => movie.title + '\n' + movie.sourcePath).join('\n\n') + (movies.length > 10 ? `\n\n…and ${movies.length - 10} more selected movies.` : '') + '\n\n' + (isPermanent ? 'WARNING: Video files will be permanently erased and cannot be recovered. Subtitles, posters, and other files stay on disk. If deletion fails, that movie stays in the library.' : action === 'trash' ? 'Only video files are moved. Subtitles, posters, and other files stay on disk. If recycling fails, that movie stays in the library.' : 'All video files, subtitles, and posters stay on disk. A future scan may add these movies again.'),
+        button: isPermanent ? 'Delete permanently' : action === 'trash' ? 'Move videos to Recycle Bin' : 'Remove library entries'
       });
       if (!approved) return { removed, failed, cancelled: true };
       for (const displayed of movies) {
@@ -27,10 +29,11 @@ function createMovieRemover({ database, confirm, trash, stat = require("node:fs/
           const current = database.getMovie(displayed.id);
           if (!current || current.sourcePath !== displayed.sourcePath || current.libraryMode !== displayed.libraryMode) throw new Error('Movie changed while confirmation was open. Review it and try again.');
           if (current.libraryMode === 'gentle' && !isGentleUnlocked()) throw new Error('Gentle mode was locked.');
-          if (action === 'trash') {
+          if (isFileAction) {
             const info = await stat(current.sourcePath);
-            if (!info.isFile() || info.isSymbolicLink() || !/\.(mp4|mkv|avi|mov|wmv|m4v|webm)$/i.test(current.sourcePath)) throw new Error('Only regular video files can be recycled.');
-            await trash(current.sourcePath);
+            if (!info.isFile() || info.isSymbolicLink() || !/\.(mp4|mkv|avi|mov|wmv|m4v|webm)$/i.test(current.sourcePath)) throw new Error('Only regular video files can be ' + (isPermanent ? 'deleted' : 'recycled') + '.');
+            if (isPermanent) await deletePermanently(current.sourcePath);
+            else await trash(current.sourcePath);
           }
           database.deleteMovie(current.id);
           removed.push(current.id);

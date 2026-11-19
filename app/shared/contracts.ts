@@ -104,6 +104,7 @@ export interface PlaybackCheckpoint {
 export interface MovieRecord {
   id: string;
   title: string;
+  displayName: string | null;
   year: number | null;
   videoId: string | null;
   sourcePath: string;
@@ -142,11 +143,36 @@ export interface ConvertVideoResult {
   error?: string;
 }
 
+export type MediaProcessingJobKind = "convert-mp4" | "generate-subtitle";
+export type MediaProcessingJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface MediaProcessingJob {
+  id: string;
+  movieId: string;
+  movieTitle: string;
+  kind: MediaProcessingJobKind;
+  status: MediaProcessingJobStatus;
+  progress: number;
+  message: string;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MediaProcessingQueueState {
+  jobs: MediaProcessingJob[];
+  running: boolean;
+}
+
+export type MovieLabelMode = "display-name" | "title" | "filename";
+
 export interface AppShellState {
   version: string;
   platform: string;
   gentleUnlocked: boolean;
   themeMode: "dark" | "light";
+  displayName: string;
+  movieLabelMode: MovieLabelMode;
   roots: LibraryRoots;
   subtitleDirs: string[];
   starterPinHint: string;
@@ -277,6 +303,15 @@ export interface ScanAutomationOptions {
   preferredSubtitleLanguage: SubtitleLanguagePreference;
   addToNormalModeLibrary: boolean;
   addToGentleModeLibrary: boolean;
+  /** When true (default), files without a recognizable JAV-style code in the
+   *  filename or parent folder are skipped during scanning. Set to false to
+   *  import all video files regardless of filename pattern. */
+  javOnly?: boolean;
+  /** When true, online metadata (title from JAVDatabase, JavDB, IMDb, or TMDB)
+   *  is used to rename the file and folder before placing it in the library.
+   *  Only effective when moveRename is true. Falls back to the filename-parsed
+   *  title when no online metadata is available. */
+  autoMetadataRename?: boolean;
 }
 
 export const VIDEO_EXTENSIONS = [

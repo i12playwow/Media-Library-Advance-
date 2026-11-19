@@ -23,7 +23,8 @@ import type {
   SubtitleGenerationOptions,
   SubtitleGenerationPreview,
   SubtitleGenerationResult,
-  SubtitleScanResult
+  SubtitleScanResult,
+  MediaProcessingQueueState
 } from "../shared/contracts";
 
 let libraryViewMode: "all" | "normal" | "gentle"=new URLSearchParams(window.location.search).has('playerWindow')?'all':'normal';
@@ -32,6 +33,8 @@ const api = {
  setLibraryViewMode: (mode: "normal" | "gentle") => {if(mode!=="normal"&&mode!=="gentle")throw Error('Choose Normal or Gentle');libraryViewMode=mode;},
 openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.invoke("player:openWindow", id),
  getPlayerWindowMovie: (): Promise<MovieRecord | null> => ipcRenderer.invoke("player:getWindowMovie"),
+ setPlayerFrameless: (frameless: boolean): Promise<{ok:boolean}> => ipcRenderer.invoke("player:setFrameless", frameless),
+ playerWindowAction: (action: "minimize" | "maximize" | "close"): Promise<{ok:boolean;maximized:boolean}> => ipcRenderer.invoke("player:windowAction", action),
  onPlayerWindowMovie: (callback: (movie: MovieRecord | null) => void) => {const listener = (_event: unknown, movie: MovieRecord | null) => callback(movie); ipcRenderer.on("player:windowMovie",listener); return () => {ipcRenderer.removeListener("player:windowMovie",listener);};},
   getGentleShortcut: (): Promise<string> =>
     ipcRenderer.invoke("settings:getGentleShortcut"),
@@ -45,6 +48,10 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     ipcRenderer.invoke("settings:getThemeMode"),
   setThemeMode: (themeMode: "dark" | "light"): Promise<AppShellState> =>
     ipcRenderer.invoke("settings:setThemeMode", themeMode),
+  setDisplayName: (name: string): Promise<AppShellState> =>
+    ipcRenderer.invoke("settings:setDisplayName", name),
+  setMovieLabelMode: (mode: "display-name" | "title" | "filename"): Promise<AppShellState> =>
+    ipcRenderer.invoke("settings:setMovieLabelMode", mode),
   getAppState: (): Promise<AppShellState> =>
     ipcRenderer.invoke("app:getState"),
   openBrowser: (): Promise<void> => ipcRenderer.invoke("app:openBrowser"),
@@ -84,6 +91,8 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     ipcRenderer.invoke("library:addRoot", mode),
   renameMovieFile: (id: string, action: "rename" | "move" | "javdatabase"): Promise<{ changed: boolean; fileName?: string }> =>
     ipcRenderer.invoke("movies:renameFile", id, action),
+  setMovieDisplayName: (id: string, displayName: string): Promise<boolean> =>
+    ipcRenderer.invoke("movies:setDisplayName", id, displayName),
   moveMovie: (movieId: string, mode: LibraryMode): Promise<LibraryMoveResult> =>
     ipcRenderer.invoke("movies:moveMode", movieId, mode),
   moveMovies: (movieIds: string[], mode: LibraryMode): Promise<LibraryMoveResult> =>
@@ -108,7 +117,9 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     ipcRenderer.invoke("actress:setPrimaryPhoto", name, photoUrl),
   actressSetRegion: (name: string, region: string): Promise<Record<string, string>> =>
     ipcRenderer.invoke("actress:setRegion", name, region),
-  removeMovies: (ids: string[], action: "library" | "trash"): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> => ipcRenderer.invoke("movies:remove", ids, action),
+  removeMovies: (ids: string[], action: "library" | "trash" | "delete-permanently"): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> => ipcRenderer.invoke("movies:remove", ids, action),
+  removeNoPosterNonAvMovies: (): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> =>
+    ipcRenderer.invoke("movies:removeNoPosterNonAv"),
   linkActressMovies: (name: string, ids: string[]): Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }> => ipcRenderer.invoke("actress:linkMovies", name, ids),
   rescanActressMetadata: (): Promise<ActressMetadataRescanSummary> => ipcRenderer.invoke("actress:rescanMetadata"),
   librarySummary: (): Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }> => ipcRenderer.invoke("movies:summary"),
@@ -182,7 +193,14 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     };
   },
   previewSubtitleOutput: (movieId: string, options: SubtitleGenerationOptions): Promise<SubtitleGenerationPreview> =>
-    ipcRenderer.invoke("subtitle:previewOutput", movieId, options)
+    ipcRenderer.invoke("subtitle:previewOutput", movieId, options),
+  processingGetState: (): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:getState"),
+  processingEnqueueMovie: (movieId: string): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:enqueueMovie", movieId),
+  onProcessingChanged: (handler: (state: MediaProcessingQueueState) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: MediaProcessingQueueState) => handler(state);
+    ipcRenderer.on("processing:changed", listener);
+    return () => ipcRenderer.removeListener("processing:changed", listener);
+  }
 };
 
 contextBridge.exposeInMainWorld("desktopApi", api);

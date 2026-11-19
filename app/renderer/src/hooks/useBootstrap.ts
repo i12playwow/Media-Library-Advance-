@@ -92,7 +92,7 @@ export function useBootstrap({
       try {
         const ps = await desktopApi.playerGetSettings();
         setPlayerSettings(ps);
-        setPlayerVolume(ps.defaultVolume);
+        setPlayerVolume(Math.max(0, Math.min(3, ps.defaultVolume)));
       } catch {
         /* not critical */
       }

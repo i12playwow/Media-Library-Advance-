@@ -1896,6 +1896,15 @@ code {
   transform: none;
 }
 
+.ctx-item.ctx-item-danger {
+  color: var(--danger);
+}
+
+.ctx-item.ctx-item-danger:hover {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--danger);
+}
+
 /* ══════════════════════════════════════════════
    MEDIA PLAYER
 ══════════════════════════════════════════════ */
@@ -2508,7 +2517,7 @@ code {
 }
 
 .player-volume {
-  width: 80px;
+  width: 110px;
   appearance: none;
   height: 3px;
   background: rgba(255,255,255,0.2);
@@ -2523,6 +2532,13 @@ code {
   border-radius: 50%;
   background: var(--text);
   cursor: pointer;
+}
+.player-volume-value {
+  min-width: 3.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* Subtitle panel */
@@ -2868,9 +2884,171 @@ kbd {
   letter-spacing: 0.06em;
 }
 
-/* Compact inline scan summary in settings */
-.scan-inline-summary {
-  padding: 0.6rem 1rem;
+/* Compact realtime scan and media-processing monitor, split into panels */
+.realtime-monitor-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.5rem;
+}
+
+.realtime-monitor {
+  padding: 0.45rem 0.8rem;
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.realtime-monitor-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.85rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.realtime-monitor .monitor-status {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.62rem;
+}
+
+.realtime-monitor-stat {
+  white-space: nowrap;
+}
+
+.realtime-monitor-stat strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.realtime-monitor-current {
+  min-width: 0;
+  max-width: min(42vw, 520px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+.display-name-dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 3rem));
+  display: grid;
+  gap: 0.7rem;
+  z-index: 60;
+}
+
+.processing-monitor-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.7rem;
+}
+
+.processing-monitor-compact {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  min-width: 0;
+}
+
+.processing-monitor-failed-panel {
+  border-color: rgba(255, 120, 120, 0.25);
+}
+
+.processing-monitor-count {
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.processing-monitor-count strong {
+  color: var(--text);
+}
+
+.processing-monitor-summary,
+.processing-monitor-counts,
+.processing-monitor-job {
+  display: flex;
+  align-items: center;
+}
+
+.processing-monitor-summary {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.processing-monitor-summary .eyebrow {
+  margin-bottom: 0.12rem;
+}
+
+.processing-monitor-counts {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem 0.8rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.processing-monitor-counts strong,
+.processing-monitor-count strong {
+  color: var(--text);
+}
+
+.processing-monitor-failed,
+.processing-monitor-failed strong {
+  color: #ff8d8d;
+}
+
+.processing-monitor-jobs {
+  display: grid;
+  gap: 0.3rem;
+  max-height: 148px;
+  overflow: auto;
+}
+
+.processing-monitor-job {
+  display: grid;
+  grid-template-columns: 38px minmax(120px, 0.7fr) minmax(180px, 1.3fr);
+  gap: 0.65rem;
+  min-height: 30px;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.75rem;
+}
+
+.processing-monitor-job strong,
+.processing-monitor-job > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.processing-monitor-job > span:last-child {
+  color: var(--muted);
+}
+
+.processing-job-kind {
+  display: inline-flex;
+  justify-content: center;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.processing-job-kind.convert-mp4 {
+  background: rgba(71, 184, 255, 0.16);
+  color: #9bdcff;
+}
+
+.processing-job-kind.generate-subtitle {
+  background: rgba(72, 201, 151, 0.16);
+  color: #9ae8c5;
 }
 
 .subtitle-scan-result {
@@ -3179,7 +3357,7 @@ kbd {
 
 .sidebar.collapsed{min-width:44px;max-width:44px}
 
-.detached-player .sidebar,.detached-player .sidebar-resize-handle,.detached-player .content>.topbar,.detached-player .panel-layout-reset{display:none!important}.detached-player .content{padding:12px;width:100%;max-width:none}.detached-player .player-page{margin:0;width:100%}.detached-player .app-shell{height:100vh}
+.detached-player .sidebar,.detached-player .sidebar-resize-handle,.detached-player .content>.topbar,.detached-player .panel-layout-reset{display:none!important}.detached-player .content{padding:12px;width:100%;max-width:none}.detached-player .player-page{margin:0;width:100%}.detached-player .app-shell{height:100vh}.frameless-player body,.frameless-player #root,.frameless-player .app-shell{background:transparent!important}.frameless-player .content{padding:0!important}.frameless-player .player-page{height:100vh!important;min-height:0!important;border:1px solid var(--line);border-radius:0;overflow:hidden}.player-window-bar{height:34px;min-height:34px;display:flex;align-items:center;justify-content:space-between;padding-left:12px;background:var(--panel);border-bottom:1px solid var(--line);-webkit-app-region:drag;user-select:none}.player-window-actions{height:100%;display:flex;-webkit-app-region:no-drag}.player-window-actions button{width:46px;border:0;border-radius:0;background:transparent;color:var(--text);font-size:17px;line-height:1}.player-window-actions button:hover{background:rgba(255,255,255,.1)}.player-window-actions .player-window-close:hover{background:#c42b1c;color:#fff}.player-page-frameless .player-body{min-height:0}
 .library-mode-switch{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.library-mode-switch button{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text);cursor:pointer}.library-mode-switch button[aria-pressed="true"]{border-color:var(--secondary);background:var(--secondary-soft)}.library-mode-switch button:disabled{opacity:.55;cursor:not-allowed}.library-mode-switch small{font-size:11px;color:var(--muted)}.library-mode-switch button:focus-visible{outline:2px solid var(--secondary);outline-offset:2px}
 
 .ctx-menu { max-height: calc(100dvh - 16px); overflow-y: auto; }

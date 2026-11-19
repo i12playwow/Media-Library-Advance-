@@ -312,6 +312,7 @@ describe("AppTopBar", () => {
         scanStageLabel="Idle"
         lastScanSummaryInvalidFiles={[]}
         getRejectedStatusLabel={() => "Invalid"}
+        processingQueue={{ jobs: [] }}
       />
     );
     expect(screen.getByText(/gentle off/i)).toBeInTheDocument();
@@ -331,6 +332,7 @@ describe("AppTopBar", () => {
         scanStageLabel="Idle"
         lastScanSummaryInvalidFiles={[]}
         getRejectedStatusLabel={() => "Invalid"}
+        processingQueue={{ jobs: [] }}
       />
     );
     expect(screen.getByText(/gentle on/i)).toBeInTheDocument();
@@ -535,6 +537,45 @@ describe("MovieTile", () => {
       />
     );
     expect(screen.getByText("Great Film")).toBeInTheDocument();
+  });
+
+  it("uses a custom display name by default", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({ displayName: "My Label", title: "Metadata Title" })}
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    expect(screen.getByText("My Label")).toBeInTheDocument();
+  });
+
+  it("can use the metadata title instead of the display name", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({ displayName: "My Label", title: "Metadata Title" })}
+        labelMode="title"
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    expect(screen.getByText("Metadata Title")).toBeInTheDocument();
+    expect(screen.queryByText("My Label")).toBeNull();
+  });
+
+  it("can use the source filename without its extension", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({ sourcePath: "C:\\Movies\\custom-file-name.mp4" })}
+        labelMode="filename"
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    expect(screen.getByText("custom-file-name")).toBeInTheDocument();
   });
 
   it("shows resolution in the tile", () => {

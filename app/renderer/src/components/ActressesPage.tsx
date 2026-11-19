@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import type { ActressMetadataRescanSummary, AppPage, LibraryMode, MovieRecord } from "../../../shared/contracts";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { ActressMetadataRescanSummary, AppPage, LibraryMode, MovieLabelMode, MovieRecord } from "../../../shared/contracts";
 import { MovieTile } from "./MovieTile";
 
 interface ActressEntry {
@@ -46,11 +46,12 @@ interface ActressesPageProps {
   onSetPrimaryActressPhoto: (name: string, photoUrl: string) => Promise<void>;
   onSaveActressRegion: (name: string, region: string) => Promise<void>;
   onRefreshActressPhotos: () => Promise<void>;
+  movieLabelMode: MovieLabelMode;
 }
 
 const ACTRESS_REGIONS = ['Japan','Chinese','America','Spain','Korea','France','Germany','Italy','Unknown'];
 
-export function ActressesPage({ actressDirectory, selectedActress, setSelectedActress, actressGridCols, changeActressGridCols, actressModeFilter, setActressModeFilter, gentleUnlocked, actressSortMode, setActressSortMode, isRefreshingActressPhotos, allMoviesPool, movies, selectedMovieId, setSelectedMovieId, setActivePage, setContextMenu, setActressContextMenu, selectedActressPhotos, selectedActressRegion, setSelectedActressRegion, onAddActressPhoto, onRemoveActressPhoto, onSetPrimaryActressPhoto, onSaveActressRegion, onRefreshActressPhotos, onAssignMovies, onPlayMovie, onRescanMetadata }: ActressesPageProps) {
+export function ActressesPage({ actressDirectory, selectedActress, setSelectedActress, actressGridCols, changeActressGridCols, actressModeFilter, setActressModeFilter, gentleUnlocked, actressSortMode, setActressSortMode, isRefreshingActressPhotos, allMoviesPool, movies, selectedMovieId, setSelectedMovieId, setActivePage, setContextMenu, setActressContextMenu, selectedActressPhotos, selectedActressRegion, setSelectedActressRegion, onAddActressPhoto, onRemoveActressPhoto, onSetPrimaryActressPhoto, onSaveActressRegion, onRefreshActressPhotos, onAssignMovies, onPlayMovie, onRescanMetadata, movieLabelMode }: ActressesPageProps) {
   const [rescanning, setRescanning] = useState(false);
   const [rescanNotice, setRescanNotice] = useState("");
   async function rescanMetadata() {
@@ -71,6 +72,8 @@ export function ActressesPage({ actressDirectory, selectedActress, setSelectedAc
   const [browserLimit, setBrowserLimit] = useState(80);
   const [movieQuery, setMovieQuery] = useState('');
   const [movieLimit, setMovieLimit] = useState(60);
+  const actressSentinelRef = useRef<HTMLDivElement | null>(null);
+  const movieSentinelRef = useRef<HTMLDivElement | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkName, setLinkName] = useState('');
   const [linkQuery, setLinkQuery] = useState('');
@@ -78,6 +81,7 @@ export function ActressesPage({ actressDirectory, selectedActress, setSelectedAc
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
   useEffect(() => { setMovieQuery(''); setMovieLimit(60); }, [selectedActress]);
+  useEffect(() => { setBrowserLimit(80); }, [query, region, order, actressModeFilter]);
   const visiblePool = useMemo(() => (allMoviesPool.length ? allMoviesPool : movies).filter(movie => (gentleUnlocked || movie.libraryMode !== 'gentle') && (actressModeFilter === 'all' || movie.libraryMode === actressModeFilter)), [allMoviesPool, movies, gentleUnlocked, actressModeFilter]);
   const active = selectedActress ? actressDirectory.find(entry => entry.name === selectedActress) : undefined;
   const regions = useMemo(() => [...new Set(actressDirectory.map(entry => entry.region || 'Unknown'))].sort(), [actressDirectory]);
@@ -96,6 +100,26 @@ export function ActressesPage({ actressDirectory, selectedActress, setSelectedAc
     const needle = linkQuery.trim().toLocaleLowerCase();
     return visiblePool.filter(movie => !needle || [movie.title,movie.videoId || '',movie.sourcePath].some(value => value.toLocaleLowerCase().includes(needle)));
   }, [visiblePool, linkQuery]);
+  useEffect(() => {
+    const sentinel = actressSentinelRef.current;
+    if (selectedActress || directory.length <= browserLimit || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    const root = sentinel.closest<HTMLElement>('.content');
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) setBrowserLimit(limit => Math.min(limit + 80, directory.length));
+    }, { root, rootMargin: '500px 0px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [selectedActress, directory.length, browserLimit]);
+  useEffect(() => {
+    const sentinel = movieSentinelRef.current;
+    if (!selectedActress || actressMovies.length <= movieLimit || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    const root = sentinel.closest<HTMLElement>('.content');
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) setMovieLimit(limit => Math.min(limit + 60, actressMovies.length));
+    }, { root, rootMargin: '500px 0px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [selectedActress, actressMovies.length, movieLimit]);
   const linked = (movie: MovieRecord) => movie.actresses.some(name => name.toLocaleLowerCase() === linkName.trim().toLocaleLowerCase());
   function openLinker(name: string) { setLinkName(name); setLinkQuery(''); setLinkIds(new Set()); setLinkError(''); setLinkOpen(true); }
   function play(movie: MovieRecord) { if (onPlayMovie) onPlayMovie(movie); else { setSelectedMovieId(movie.id); setActivePage('library'); } }
@@ -136,14 +160,14 @@ export function ActressesPage({ actressDirectory, selectedActress, setSelectedAc
       <div className="actress-profile-tools"><label className="form-field"><span>Region</span><input className="search-input" list="actress-region-options" value={selectedActressRegion} onChange={event=>setSelectedActressRegion(event.target.value)}/><datalist id="actress-region-options">{ACTRESS_REGIONS.map(value=><option key={value} value={value}/>)}</datalist></label><button className="ghost-button" type="button" onClick={()=>void onSaveActressRegion(active.name,selectedActressRegion)}>Save region</button><button className="ghost-button" type="button" disabled={!selectedActressPhotos.length} onClick={()=>void onRemoveActressPhoto(active.name)}>Remove profile photos</button></div>
       {selectedActressPhotos.length>0&&<div className="actress-gallery">{selectedActressPhotos.map((photo,index)=><div className="actress-gallery-card" key={photo}><button className={`actress-gallery-item${index===0?' primary':''}`} type="button" aria-label={`${index===0?'Primary photo of':'Set primary photo of'} ${active.name} ${index+1}`} onClick={()=>void onSetPrimaryActressPhoto(active.name,photo)}><img src={photo} alt={`${active.name} ${index+1}`} loading="lazy"/></button><button className="ghost-button" type="button" onClick={()=>void onRemoveActressPhoto(active.name,photo)}>Remove photo {index+1}</button></div>)}</div>}
       <div className="actress-profile-movies-header"><h4>Movies in your library</h4><label className="form-field"><span>Find movies in this profile</span><input className="search-input" value={movieQuery} placeholder="Title or movie code" onChange={event=>{setMovieQuery(event.target.value);setMovieLimit(60);}}/></label></div>
-      <div className="movie-grid actress-title-grid" style={{'--cols':4} as React.CSSProperties}>{actressMovies.slice(0,movieLimit).map(movie=><MovieTile key={movie.id} movie={movie} isActive={movie.id===selectedMovieId} separator="dot" onContextMenu={event=>{event.preventDefault();setContextMenu({movie,x:event.clientX,y:event.clientY});}} onClick={()=>play(movie)} onPlay={()=>play(movie)}/>)}</div>
-      {!actressMovies.length&&<p className="subtle">No matching movies. Clear the movie search or link more library movies.</p>}{actressMovies.length>movieLimit&&<button className="ghost-button" type="button" onClick={()=>setMovieLimit(current=>current+60)}>Show more movies</button>}
+      <div className="movie-grid actress-title-grid" style={{'--cols':4} as React.CSSProperties}>{actressMovies.slice(0,movieLimit).map(movie=><MovieTile key={movie.id} movie={movie} labelMode={movieLabelMode} isActive={movie.id===selectedMovieId} separator="dot" onContextMenu={event=>{event.preventDefault();setContextMenu({movie,x:event.clientX,y:event.clientY});}} onClick={()=>play(movie)} onPlay={()=>play(movie)}/>)}</div>
+      {!actressMovies.length&&<p className="subtle">No matching movies. Clear the movie search or link more library movies.</p>}{actressMovies.length>movieLimit&&<div className="load-more-bar" ref={movieSentinelRef}><span className="load-more-count">Showing {Math.min(movieLimit,actressMovies.length)} of {actressMovies.length} movies</span><button className="ghost-button" type="button" onClick={()=>setMovieLimit(current=>Math.min(current+60,actressMovies.length))}>Load more movies</button></div>}
     </div> : <div className="panel actresses-overview-panel">
       <div className="panel-header"><div><h3>Actresses</h3><p className="subtle">{actressDirectory.length} profiles from {visiblePool.length} accessible library movies</p></div><div className="inline-actions">{rescanButton}<button className="primary-button" type="button" onClick={()=>openLinker('')}>Add actress to movies</button><button className="ghost-button" type="button" disabled={isRefreshingActressPhotos} onClick={()=>void onRefreshActressPhotos()}>{isRefreshingActressPhotos?'Fetching photos…':'Refresh photos'}</button></div></div>
       <div className="actress-flow-toolbar"><label className="form-field"><span>Find actress</span><input className="search-input" value={query} placeholder="Name, studio, or tag" onChange={event=>{setQuery(event.target.value);setBrowserLimit(80);}}/></label><label className="form-field"><span>Region filter</span><select className="filter-select" value={region} onChange={event=>{setRegion(event.target.value);setBrowserLimit(80);}}><option value="all">All regions</option>{regions.map(value=><option key={value} value={value}>{value}</option>)}</select></label><label className="form-field"><span>Browse order</span><select className="filter-select" value={order} onChange={event=>{setOrder(event.target.value);if(event.target.value!=="name")setActressSortMode(event.target.value as "count"|"studio"|"tag");}}><option value="count">Most movies</option><option value="name">Name A–Z</option><option value="studio">Studio</option><option value="tag">Tag</option></select></label></div>
       <div className="actress-mode-tabs">{(['all','normal',...(gentleUnlocked?['gentle']:[])] as const).map(mode=><button className={`actress-mode-tab${actressModeFilter===mode?' active':''}`} type="button" key={mode} onClick={()=>{setActressModeFilter(mode as 'all'|LibraryMode);setBrowserLimit(80);}}>{mode==='all'?'All accessible movies':mode==='normal'?'Normal':'Gentle'}</button>)}<div className="actress-zoom-bar"><button className="actress-zoom-btn" type="button" aria-label="Larger actress cards" disabled={actressGridCols<=2} onClick={()=>changeActressGridCols(actressGridCols-1)}>+</button><button className="actress-zoom-btn" type="button" aria-label="Smaller actress cards" disabled={actressGridCols>=9} onClick={()=>changeActressGridCols(actressGridCols+1)}>−</button></div></div>
       <p className="subtle" aria-live="polite">{directory.length} matching profiles</p><div className="actress-grid" style={{'--actress-cols':actressGridCols} as React.CSSProperties}>{directory.slice(0,browserLimit).map(entry=><button className="actress-card" type="button" key={entry.name} onClick={()=>setSelectedActress(entry.name)} onContextMenu={event=>{event.preventDefault();setActressContextMenu({name:entry.name,x:event.clientX,y:event.clientY});}} aria-label={`Open actress ${entry.name}`}><div className="actress-photo"><div className="actress-avatar">{entry.posterUrl?<img className="actress-avatar-img" src={entry.posterUrl} alt={entry.name} loading="lazy" decoding="async"/>:<div className="actress-avatar-fallback">{entry.name.split(' ').map(word=>word[0]).slice(0,2).join('').toUpperCase()}</div>}</div><div className="actress-overlay"><strong className="actress-name">{entry.name}</strong><span className="actress-count">{entry.count} library titles</span><span className="actress-count actress-meta-line">{entry.name === "Unknown" ? "No actress name in metadata" : entry.region}</span></div></div></button>)}</div>
-      {!directory.length&&<div className="actress-flow-empty"><h4>{query||region!=='all'?'No matching actresses':'Start an actress profile'}</h4><p className="subtle">{query||region!=='all'?'Change the name or region filter to find a profile.':'Use Add actress to movies to connect a name to videos already in your library.'}</p>{(query||region!=='all')&&<button className="ghost-button" type="button" onClick={()=>{setQuery('');setRegion('all');}}>Clear actress filters</button>}</div>}{directory.length>browserLimit&&<button className="ghost-button" type="button" onClick={()=>setBrowserLimit(current=>current+80)}>Show more actresses</button>}
+      {!directory.length&&<div className="actress-flow-empty"><h4>{query||region!=='all'?'No matching actresses':'Start an actress profile'}</h4><p className="subtle">{query||region!=='all'?'Change the name or region filter to find a profile.':'Use Add actress to movies to connect a name to videos already in your library.'}</p>{(query||region!=='all')&&<button className="ghost-button" type="button" onClick={()=>{setQuery('');setRegion('all');}}>Clear actress filters</button>}</div>}{directory.length>browserLimit&&<div className="load-more-bar" ref={actressSentinelRef}><span className="load-more-count">Showing {Math.min(browserLimit,directory.length)} of {directory.length} actresses</span><button className="ghost-button" type="button" onClick={()=>setBrowserLimit(current=>Math.min(current+80,directory.length))}>Load more actresses</button></div>}
     </div>}
     {linker}
   </section>;

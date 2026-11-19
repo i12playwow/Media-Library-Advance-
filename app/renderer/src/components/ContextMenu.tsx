@@ -19,12 +19,14 @@ interface ContextMenuProps {
   onCopyPath: () => void;
   onRemoveLibrary?: () => void;
   onTrashFile?: () => void;
+  onDeletePermanently?: () => void;
   onRenameFile?: () => void;
   onAutoRename?: () => void;
   onRenameAndMove?: () => void;
   onTrashSelection?: () => void;
   selectedCount?: number;
   onCopyVideoId?: () => void;
+  onEditDisplayName?: () => void;
 }
 
 export function ContextMenu({
@@ -40,12 +42,14 @@ export function ContextMenu({
   onCopyPath,
   onRemoveLibrary,
   onTrashFile,
+  onDeletePermanently,
   onRenameFile,
   onAutoRename,
   onRenameAndMove,
   onTrashSelection,
   selectedCount,
   onCopyVideoId,
+  onEditDisplayName,
 }: ContextMenuProps) {
   const { movie, x, y } = contextMenu;
   return (
@@ -118,10 +122,12 @@ export function ContextMenu({
           </li>
         )}
         {onAutoRename && <li><button className="ctx-item" type="button" onClick={onAutoRename}>Auto-rename from JAVDatabase…</button></li>}
+        {onEditDisplayName && <li><button className="ctx-item" type="button" onClick={onEditDisplayName}>Edit display name…</button></li>}
         {onRenameFile && <li><button className="ctx-item" type="button" onClick={onRenameFile}>Rename video file…</button></li>}
         {onRenameAndMove && <li><button className="ctx-item" type="button" onClick={onRenameAndMove}>Rename and move video…</button></li>}
         {onRemoveLibrary && <li><button className="ctx-item" type="button" onClick={onRemoveLibrary}>Remove from library…</button></li>}
         {onTrashFile && <li><button className="ctx-item" type="button" onClick={onTrashFile}>Delete video file…</button></li>}
+        {onDeletePermanently && <li><button className="ctx-item ctx-item-danger" type="button" onClick={onDeletePermanently}>Delete video file permanently…</button></li>}
         {onTrashSelection && <li><button className="ctx-item" type="button" onClick={onTrashSelection}>Delete {selectedCount} selected video files…</button></li>}
       </ul>
     </div>

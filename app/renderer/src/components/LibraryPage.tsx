@@ -2,7 +2,7 @@ import { LibraryModeSwitch } from "./LibraryModeSwitch";
 import { LibraryCounts } from "./LibraryCounts";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { LibraryMode, MovieRecord } from "../../../shared/contracts";
+import type { LibraryMode, MovieLabelMode, MovieRecord } from "../../../shared/contracts";
 import { distinctPosterMovies } from "../distinctPosterMovies";
 import { MovieTile } from "./MovieTile";
 
@@ -39,10 +39,12 @@ interface LibraryPageProps {
   selectMissingPosterTitles: () => void;
   handleRefreshSelectedPosters: (movieIds?: string[]) => Promise<void>;
   handleBatchMove: (mode: LibraryMode) => Promise<void>;
-  onRemoveMovies?: (ids: string[], action: "library" | "trash") => Promise<void>;
+  onRemoveMovies?: (ids: string[], action: "library" | "trash" | "delete-permanently") => Promise<void>;
+  onRemoveNoPosterNonAv?: () => Promise<void>;
   loadMoreMovies: () => Promise<void>;
   PAGE_SIZE: number;
   onPlayMovie: (movie: MovieRecord) => void;
+  movieLabelMode: MovieLabelMode;
 }
 
 export function LibraryPage({
@@ -68,9 +70,11 @@ export function LibraryPage({
   handleRefreshSelectedPosters,
   handleBatchMove,
   onRemoveMovies,
+  onRemoveNoPosterNonAv,
   loadMoreMovies,
   PAGE_SIZE,
   onPlayMovie,
+  movieLabelMode,
 }: LibraryPageProps) {
   const [groupCopies, setGroupCopies] = useState(true);
   const posterMovies = distinctPosterMovies(sortedMovies.filter(movie => gentleUnlocked || movie.libraryMode !== "gentle"), groupCopies);
@@ -92,22 +96,26 @@ export function LibraryPage({
     finally { loadingMoreRef.current = false; setLoadingMore(false); }
   }
 
-  // Infinite scroll: when the load-more bar approaches the viewport, fetch the
-  // next page automatically. The manual button stays as a fallback. The guard
-  // is required because loadMoreMovies has no reentrancy protection — two
-  // overlapping calls would append the same page twice.
+  // Load the next page before the sentinel reaches the visible edge of the
+  // app's actual scrolling container. The button remains as a retry fallback.
   useEffect(() => {
     const bar = loadMoreBarRef.current;
     if (!hasMoreMovies || loadError || !bar || typeof IntersectionObserver === "undefined") return;
+    const scrollRoot = bar.closest<HTMLElement>(".content");
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting && entry.target.isConnected) || loadingMoreRef.current) return;
         loadingMoreRef.current = true;
-        void loadMoreRef.current().finally(() => {
-          loadingMoreRef.current = false;
-        });
+        setLoadingMore(true);
+        setLoadError(false);
+        void loadMoreRef.current()
+          .catch(() => setLoadError(true))
+          .finally(() => {
+            loadingMoreRef.current = false;
+            setLoadingMore(false);
+          });
       },
-      { rootMargin: "600px 0px" },
+      { root: scrollRoot, rootMargin: "600px 0px" },
     );
     observer.observe(bar);
     return () => observer.disconnect();
@@ -128,7 +136,8 @@ export function LibraryPage({
           </div>
           <LibraryModeSwitch gentleUnlocked={gentleUnlocked}/><div className="inline-actions">
             <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
-            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Delete selected ({selectedIdSet.size})…</button></>}
+            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Delete selected ({selectedIdSet.size})…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "delete-permanently")} title="Permanently delete the selected video files. This cannot be undone.">Delete selected permanently…</button></>}
+            {onRemoveNoPosterNonAv && <button className="ghost-button" type="button" disabled={isScanning} onClick={() => void onRemoveNoPosterNonAv()} title="Remove library entries that have no poster and no JAV-style ID. Files on disk are kept.">Remove non-AV without posters…</button>}
             <div className="columns-control">
               <span>Sort</span>
               <select
@@ -236,6 +245,7 @@ export function LibraryPage({
             <MovieTile
               key={movie.id}
               movie={movie}
+              labelMode={movieLabelMode}
               isActive={movie.id === selectedMovieId}
               isSelected={selectedIdSet.has(movie.id)}
               showCheckbox

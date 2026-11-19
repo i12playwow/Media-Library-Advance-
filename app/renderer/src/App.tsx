@@ -10,12 +10,14 @@ import type {
   AppPage,
   AppShellState,
   LibraryMode,
+  MovieLabelMode,
   MovieRecord,
 } from "../../shared/contracts";
 import { AppSidebar } from "./components/AppSidebar";
 import { AppTopBar } from "./components/AppTopBar";
 import { ActressesPage } from "./components/ActressesPage";
 import { ContextMenu } from "./components/ContextMenu";
+import { DisplayNameDialog } from "./components/DisplayNameDialog";
 import { ActressContextMenu } from "./components/ActressContextMenu";
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
@@ -64,6 +66,15 @@ export function App() {
   const [appState, setAppState] = useState<AppShellState | null>(null);
   const [activePage, setActivePage] = useState<AppPage>("home");
   const [statusMessage, setStatusMessage] = useState("Preparing local library...");
+  const [processingQueue, setProcessingQueue] = useState<import("../../shared/contracts").MediaProcessingQueueState>({ jobs: [], running: false });
+  useEffect(() => {
+    if (!desktopApi?.processingGetState) return;
+    void desktopApi.processingGetState().then(setProcessingQueue).catch(() => undefined);
+    return desktopApi.onProcessingChanged((next) => {
+      setProcessingQueue(next);
+      if (next.jobs.some(job => job.status === "completed")) refreshMoviesRef.current();
+    });
+  }, [desktopApi]);
   const openBrowser = useCallback(() => {
     void desktopApi?.openBrowser?.().catch(() => setStatusMessage("Could not open the browser."));
   }, [desktopApi]);
@@ -79,6 +90,9 @@ export function App() {
     movie: MovieRecord;
     x: number;
     y: number;
+  } | null>(null);
+  const [displayNameDialog, setDisplayNameDialog] = useState<{
+    movie: MovieRecord;
   } | null>(null);
   const [actressContextMenu, setActressContextMenu] = useState<{
     name: string;
@@ -227,7 +241,17 @@ export function App() {
   } = player;
 
 
-  const detachedPlayer = new URLSearchParams(window.location.search).has('playerWindow');
+  const playerWindowParams = new URLSearchParams(window.location.search);
+  const detachedPlayer = playerWindowParams.has('playerWindow');
+  const [playerFrameless, setPlayerFrameless] = useState(detachedPlayer && playerWindowParams.has('frameless'));
+  const [playerWindowMaximized, setPlayerWindowMaximized] = useState(false);
+  useEffect(() => {
+    document.documentElement.classList.toggle("detached-player", detachedPlayer);
+    document.documentElement.classList.toggle("frameless-player", detachedPlayer && playerFrameless);
+    return () => {
+      document.documentElement.classList.remove("detached-player", "frameless-player");
+    };
+  }, [detachedPlayer, playerFrameless]);
   const loadMovieIntoPlayer = (movie: MovieRecord) => detachedPlayer ? loadInlineMovie(movie) : desktopApi.openPlayerWindow(movie.id).then(() => {});
   useEffect(() => {
     if (!detachedPlayer || !desktopApi) return;
@@ -265,7 +289,19 @@ export function App() {
     }
   }
 
-  async function removeMovies(ids: string[], action: "library" | "trash"): Promise<void> {
+  async function setMovieDisplayName(id: string, displayName: string): Promise<void> {
+    if (!desktopApi) return;
+    setDisplayNameDialog(null);
+    try {
+      await desktopApi.setMovieDisplayName(id, displayName);
+      setStatusMessage(displayName.trim() ? "Display name updated." : "Display name cleared.");
+      await refreshMovies(deferredSearch);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Could not update the display name.");
+    }
+  }
+
+  async function removeMovies(ids: string[], action: "library" | "trash" | "delete-permanently"): Promise<void> {
     if (!desktopApi) return;
     setContextMenu(null);
     try {
@@ -277,6 +313,21 @@ export function App() {
       await refreshMovies(deferredSearch);
       setAllMoviesPool(await desktopApi.listAllMovies());
     } catch (error) { setStatusMessage(error instanceof Error ? error.message : "Could not remove movies."); }
+  }
+
+  async function removeNoPosterNonAvMovies(): Promise<void> {
+    if (!desktopApi) return;
+    try {
+      const result = await desktopApi.removeNoPosterNonAvMovies();
+      if (result.cancelled) return;
+      if (result.removed.length === 0) {
+        setStatusMessage("No library entries match — every non-AV video already has a poster.");
+        return;
+      }
+      setStatusMessage("Removed " + result.removed.length + " non-AV movie(s) without posters." + (result.failed.length ? " " + result.failed.length + " failed: " + result.failed[0].error : ""));
+      await refreshMovies(deferredSearch);
+      setAllMoviesPool(await desktopApi.listAllMovies());
+    } catch (error) { setStatusMessage(error instanceof Error ? error.message : "Could not run the cleanup."); }
   }
 
   const organizationPreview = useMemo(
@@ -348,6 +399,7 @@ export function App() {
     playerSettings,
     refreshMovies,
     refreshPostersOnly,
+    setMovies,
     setActressPhotos,
     setAllMoviesPool,
     setStatusMessage,
@@ -576,6 +628,23 @@ export function App() {
       playerDownloadSubtitleFile={async (url) => desktopApi?.playerDownloadSubtitle(url) ?? null}
       playerOpenFile={async (filePath) => { await desktopApi?.openFile(filePath); }}
       playerShowInFolder={async (filePath) => { await desktopApi?.showInFolder(filePath); }}
+      detachedWindow={detachedPlayer}
+      frameless={playerFrameless}
+      windowMaximized={playerWindowMaximized}
+      onToggleFrameless={() => {
+        const video = videoRef.current;
+        const positionSeconds = video?.currentTime ?? playerCurrentTime;
+        const wasPlaying = Boolean(video && !video.paused);
+        void desktopApi.setPlayerFrameless(!playerFrameless).then(() => {
+          setPlayerFrameless(value => !value);
+          pendingRestorePositionRef.current = positionSeconds;
+          setPlayerPlaying(wasPlaying);
+          if (wasPlaying) window.setTimeout(() => { if (!videoRef.current) return; void videoRef.current.play().catch(() => {}); }, 250);
+        });
+      }}
+      onWindowAction={(action) => {
+        void desktopApi.playerWindowAction(action).then(result => setPlayerWindowMaximized(result.maximized));
+      }}
     />
   );
 
@@ -611,8 +680,10 @@ export function App() {
           onCancelScan={() => void desktopApi?.cancelScan()}
           onOpenBrowser={desktopApi.openBrowser ? openBrowser : undefined}
           gentleUnlocked={appState?.gentleUnlocked ?? false}
+          displayName={appState?.displayName}
           scanProgress={scanProgress}
           scanStageLabel={scanStageLabel}
+          processingQueue={processingQueue}
           lastScanSummaryInvalidFiles={lastScanSummary?.invalidFiles ?? []}
           getRejectedStatusLabel={getRejectedStatusLabel}
         />
@@ -622,6 +693,7 @@ export function App() {
             movies={movies}
             appState={appState}
             lastScanSummary={lastScanSummary}
+            processingQueue={processingQueue}
           />
         )}
 
@@ -649,9 +721,11 @@ export function App() {
             handleRefreshSelectedPosters={handleRefreshSelectedPosters}
             handleBatchMove={handleBatchMove}
             onRemoveMovies={removeMovies}
+            onRemoveNoPosterNonAv={removeNoPosterNonAvMovies}
             loadMoreMovies={loadMoreMovies}
             PAGE_SIZE={PAGE_SIZE}
             onPlayMovie={handlePlayMovieFromLibrary}
+            movieLabelMode={appState.movieLabelMode}
           />
         </BrowsePageMemory>
 
@@ -688,6 +762,7 @@ export function App() {
             setActivePage={setActivePage}
             setContextMenu={setContextMenu}
           setActressContextMenu={setActressContextMenu}
+          movieLabelMode={appState.movieLabelMode}
           selectedActressPhotos={selectedActressPhotos}
           selectedActressRegion={selectedActressRegionDraft}
           setSelectedActressRegion={setSelectedActressRegionDraft}
@@ -761,6 +836,11 @@ export function App() {
             themeModeDraft={themeModeDraft}
             setThemeModeDraft={setThemeModeDraft}
             onSaveThemeMode={handleSaveThemeMode}
+            onSaveMovieLabelMode={async (mode: MovieLabelMode) => {
+              const nextState = await desktopApi.setMovieLabelMode(mode);
+              setAppState(nextState);
+              setStatusMessage("Movie tile labels saved.");
+            }}
             organizationPreview={organizationPreview}
             onSaveOrganizationSettings={handleSaveOrganizationSettings}
             applyOrganizationPreset={applyOrganizationPreset}
@@ -844,6 +924,7 @@ export function App() {
           onToggleSelect={() => { toggleSelected(contextMenu.movie.id); setContextMenu(null); }}
           onRemoveLibrary={() => void removeMovies([contextMenu.movie.id], "library")}
           onTrashFile={() => void removeMovies([contextMenu.movie.id], "trash")}
+          onDeletePermanently={() => void removeMovies([contextMenu.movie.id], "delete-permanently")}
           onRenameFile={() => void renameMovieFile(contextMenu.movie.id, "rename")}
           onAutoRename={() => void renameMovieFile(contextMenu.movie.id, "javdatabase")}
           onRenameAndMove={() => void renameMovieFile(contextMenu.movie.id, "move")}
@@ -853,6 +934,18 @@ export function App() {
             : undefined}
           onCopyPath={() => { void navigator.clipboard.writeText(contextMenu.movie.sourcePath); setContextMenu(null); }}
           onCopyVideoId={contextMenu.movie.videoId ? () => { void navigator.clipboard.writeText(contextMenu.movie.videoId!); setContextMenu(null); } : undefined}
+          onEditDisplayName={() => {
+            setDisplayNameDialog({ movie: contextMenu.movie });
+            setContextMenu(null);
+          }}
+        />
+      )}
+
+      {displayNameDialog && (
+        <DisplayNameDialog
+          movie={displayNameDialog.movie}
+          onClose={() => setDisplayNameDialog(null)}
+          onSave={(name) => void setMovieDisplayName(displayNameDialog.movie.id, name)}
         />
       )}
 

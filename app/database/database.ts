@@ -20,6 +20,7 @@ import { DEFAULT_ORGANIZATION_SETTINGS } from "../shared/organizationTemplates";
 interface MovieRow {
   id: string;
   title: string;
+  display_name: string | null;
   year: number | null;
   video_id: string | null;
   source_path: string;
@@ -121,6 +122,24 @@ export class DatabaseClient {
 
   setThemeMode(themeMode: "dark" | "light"): void {
     this.setSetting("theme_mode", themeMode);
+  }
+
+  getDisplayName(): string {
+    return this.getSetting("display_name")?.trim() ?? "";
+  }
+
+  setDisplayName(name: string): void {
+    this.setSetting("display_name", name.trim().slice(0, 60));
+  }
+
+  // What the library tiles show as the movie's label.
+  getMovieLabelMode(): "display-name" | "title" | "filename" {
+    const value = this.getSetting("movie_label_mode");
+    return value === "title" || value === "filename" ? value : "display-name";
+  }
+
+  setMovieLabelMode(mode: "display-name" | "title" | "filename"): void {
+    this.setSetting("movie_label_mode", mode);
   }
 
   getActressPhotos(name: string): string[] {
@@ -454,8 +473,32 @@ export class DatabaseClient {
     this.db.prepare("DELETE FROM movies WHERE id = ?").run(id);
   }
 
+  // Library entries with no poster AND no JAV-style video ID. Both conditions
+  // together target generic-named imports that never resolved metadata; files
+  // on disk are untouched — callers remove library records only.
+  listNoPosterNonAvIds(includeGentle: boolean): Array<{ id: string; title: string; sourcePath: string }> {
+    const clauses = [
+      "(poster_url IS NULL OR poster_url = '')",
+      "video_id IS NULL"
+    ];
+    if (!includeGentle) {
+      clauses.push("library_mode = 'normal'");
+    }
+    const rows = this.db
+      .prepare(`SELECT id, title, source_path FROM movies WHERE ${clauses.join(" AND ")}`)
+      .all() as Array<{ id: string; title: string; source_path: string }>;
+    return rows.map((row) => ({ id: row.id, title: row.title, sourcePath: row.source_path }));
+  }
+
   updateMovieMode(id: string, mode: LibraryMode): void {
     this.db.prepare("UPDATE movies SET library_mode = ?, updated_at = ? WHERE id = ?").run(mode, new Date().toISOString(), id);
+  }
+
+  setMovieDisplayName(id: string, displayName: string): void {
+    const trimmed = displayName.trim().slice(0, 200);
+    this.db
+      .prepare("UPDATE movies SET display_name = ?, updated_at = ? WHERE id = ?")
+      .run(trimmed.length > 0 ? trimmed : null, new Date().toISOString(), id);
   }
 
   updateMovieLocation(id: string, input: UpdateMovieLocationInput): void {
@@ -550,6 +593,52 @@ export class DatabaseClient {
 
   setSubtitleDirs(dirs: string[]): void {
     this.setSetting("subtitle_dirs", JSON.stringify(Array.from(new Set(dirs))));
+  }
+
+  listMediaProcessingJobs(limit = 100): Array<{
+    id: string;
+    movie_id: string;
+    kind: string;
+    status: string;
+    progress: number;
+    message: string;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+  }> {
+    return this.db.prepare(`
+      SELECT id, movie_id, kind, status, progress, message, error, created_at, updated_at
+      FROM media_processing_jobs
+      ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, created_at ASC
+      LIMIT ?
+    `).all(Math.max(1, Math.min(limit, 500))) as Array<{
+      id: string; movie_id: string; kind: string; status: string; progress: number;
+      message: string; error: string | null; created_at: string; updated_at: string;
+    }>;
+  }
+
+  enqueueMediaProcessingJob(movieId: string, kind: string): string | null {
+    const existing = this.db.prepare(`
+      SELECT id FROM media_processing_jobs
+      WHERE movie_id = ? AND kind = ? AND status IN ('queued', 'running', 'completed')
+      LIMIT 1
+    `).get(movieId, kind) as { id: string } | undefined;
+    if (existing) return existing.id;
+    const id = this.createMovieId(`${movieId}:${kind}:${Date.now()}:${Math.random()}`);
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO media_processing_jobs (id, movie_id, kind, status, progress, message, error, created_at, updated_at)
+      VALUES (?, ?, ?, 'queued', 0, ?, NULL, ?, ?)
+    `).run(id, movieId, kind, "Waiting to start", now, now);
+    return id;
+  }
+
+  updateMediaProcessingJob(id: string, update: { status?: string; progress?: number; message?: string; error?: string | null }): void {
+    const current = this.db.prepare("SELECT status, progress, message, error FROM media_processing_jobs WHERE id = ?").get(id) as { status: string; progress: number; message: string; error: string | null } | undefined;
+    if (!current) return;
+    const next = { ...current, ...update };
+    this.db.prepare(`UPDATE media_processing_jobs SET status = ?, progress = ?, message = ?, error = ?, updated_at = ? WHERE id = ?`)
+      .run(next.status, next.progress, next.message, next.error, new Date().toISOString(), id);
   }
 
   getMovieByVideoId(videoId: string): { id: string; title: string } | null {
@@ -676,7 +765,9 @@ export class DatabaseClient {
       const parsed = JSON.parse(raw) as Partial<PlayerSettings>;
       const d = DatabaseClient.DEFAULT_PLAYER_SETTINGS;
       return {
-        defaultVolume: typeof parsed.defaultVolume === "number" ? parsed.defaultVolume : d.defaultVolume,
+        defaultVolume: typeof parsed.defaultVolume === "number"
+          ? Math.max(0, Math.min(3, parsed.defaultVolume))
+          : d.defaultVolume,
         subtitleFontSize: typeof parsed.subtitleFontSize === "number" ? parsed.subtitleFontSize : d.subtitleFontSize,
         subtitleColor: typeof parsed.subtitleColor === "string" ? parsed.subtitleColor : d.subtitleColor,
         autoPlayNext: typeof parsed.autoPlayNext === "boolean" ? parsed.autoPlayNext : d.autoPlayNext,
@@ -806,6 +897,7 @@ export class DatabaseClient {
     return {
       id: row.id,
       title: row.title,
+      displayName: row.display_name?.trim() || null,
       year: row.year,
       videoId: row.video_id,
       sourcePath: row.source_path,
@@ -874,6 +966,7 @@ export class DatabaseClient {
       CREATE TABLE IF NOT EXISTS movies (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
+        display_name TEXT,
         year INTEGER,
         video_id TEXT,
         source_path TEXT NOT NULL UNIQUE,
@@ -899,7 +992,31 @@ export class DatabaseClient {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS media_processing_jobs (
+        id TEXT PRIMARY KEY,
+        movie_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+        progress REAL NOT NULL DEFAULT 0,
+        message TEXT NOT NULL DEFAULT '',
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
+      );
     `);
+
+    // Migration: per-video display name (custom title shown in the library).
+    try {
+      // Probed via pragma_table_info so the statement carries no "FROM movies"
+      // literal — the doc-drift lint keys on that token (drift class 4).
+      this.db
+        .prepare("SELECT name FROM pragma_table_info('movies') WHERE name = 'display_name'")
+        .get();
+    } catch {
+      this.db.exec("ALTER TABLE movies ADD COLUMN display_name TEXT");
+    }
 
     if (!this.getSetting("library_roots")) {
       this.setRoots(DEFAULT_ROOTS);

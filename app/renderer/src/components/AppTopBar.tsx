@@ -1,4 +1,4 @@
-import type { LibraryMode, ScanProgress } from "../../../shared/contracts";
+import type { LibraryMode, MediaProcessingQueueState, ScanProgress } from "../../../shared/contracts";
 
 interface InvalidFileEntry {
   path: string;
@@ -16,8 +16,10 @@ interface AppTopBarProps {
   gentleUnlocked: boolean;
   scanProgress: ScanProgress | null;
   scanStageLabel: string;
+  processingQueue: MediaProcessingQueueState;
   lastScanSummaryInvalidFiles: InvalidFileEntry[];
   getRejectedStatusLabel: (status: "incomplete" | "corrupt" | "invalid") => string;
+  displayName?: string;
 }
 
 export function AppTopBar({
@@ -30,15 +32,26 @@ export function AppTopBar({
   gentleUnlocked,
   scanProgress,
   scanStageLabel,
+  processingQueue,
   lastScanSummaryInvalidFiles,
   getRejectedStatusLabel: rejectedLabel,
+  displayName,
 }: AppTopBarProps) {
+  const activeJobs = processingQueue.jobs.filter((job) => job.status === "queued" || job.status === "running");
+  const conversionJobs = activeJobs.filter((job) => job.kind === "convert-mp4");
+  const subtitleJobs = activeJobs.filter((job) => job.kind === "generate-subtitle");
+  const runningConversion = conversionJobs.find((job) => job.status === "running");
+  const runningSubtitle = subtitleJobs.find((job) => job.status === "running");
+  const showScanPanel = Boolean(scanProgress && isScanning);
+  const showConversionPanel = conversionJobs.length > 0;
+  const showSubtitlePanel = subtitleJobs.length > 0;
+
   return (
     <>
       <header className="topbar">
         <div>
           <p className="eyebrow">Local only</p>
-          <h2>No external API server</h2>
+          <h2>{displayName ? `${displayName}'s library` : "No external API server"}</h2>
         </div>
         <div className="topbar-actions">
           <input
@@ -75,14 +88,50 @@ export function AppTopBar({
         </div>
       </header>
 
-      {scanProgress && isScanning && (
-        <section className="panel scan-inline-summary">
-          <div className="scan-inline-row">
-            <span className={isScanning ? "monitor-status active" : "monitor-status"}>{scanStageLabel}</span>
-            <span>{scanProgress.imported} imported · {scanProgress.skipped} skipped · {scanProgress.totalFiles} total</span>
-            {scanProgress.currentFile && <code className="scan-inline-file">{scanProgress.currentFile}</code>}
-          </div>
-        </section>
+      {(showScanPanel || showConversionPanel || showSubtitlePanel) && (
+        <div className="realtime-monitor-panels">
+          {showScanPanel && (
+            <section className="panel realtime-monitor" aria-label="Realtime scan monitor">
+              <div className="realtime-monitor-row">
+                <span className="monitor-status active">Scan</span>
+                <span className="realtime-monitor-stat">
+                  {scanStageLabel} · {scanProgress!.processedFiles}/{scanProgress!.totalFiles} · {scanProgress!.imported} added
+                </span>
+                {scanProgress!.currentFile && (
+                  <code className="realtime-monitor-current" title={scanProgress!.currentFile}>{scanProgress!.currentFile}</code>
+                )}
+              </div>
+            </section>
+          )}
+
+          {showConversionPanel && (
+            <section className="panel realtime-monitor" aria-label="Realtime video conversion monitor">
+              <div className="realtime-monitor-row">
+                <span className={runningConversion ? "monitor-status active" : "monitor-status"}>Convert</span>
+                <span className="realtime-monitor-stat">{conversionJobs.length} active</span>
+                {runningConversion && (
+                  <span className="realtime-monitor-current" title={`${runningConversion.movieTitle} — ${runningConversion.message}`}>
+                    {runningConversion.movieTitle} · {Math.round(runningConversion.progress)}%
+                  </span>
+                )}
+              </div>
+            </section>
+          )}
+
+          {showSubtitlePanel && (
+            <section className="panel realtime-monitor" aria-label="Realtime subtitle generation monitor">
+              <div className="realtime-monitor-row">
+                <span className={runningSubtitle ? "monitor-status active" : "monitor-status"}>Subtitles</span>
+                <span className="realtime-monitor-stat">{subtitleJobs.length} active</span>
+                {runningSubtitle && (
+                  <span className="realtime-monitor-current" title={`${runningSubtitle.movieTitle} — ${runningSubtitle.message}`}>
+                    {runningSubtitle.movieTitle} · {Math.round(runningSubtitle.progress)}%
+                  </span>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       )}
 
       {lastScanSummaryInvalidFiles.length > 0 && (
