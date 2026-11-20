@@ -965,6 +965,16 @@ export class DatabaseClient {
       .run(next.status, next.progress, next.message, next.error, new Date().toISOString(), id);
   }
 
+  /** Requeue jobs orphaned in 'running' by a previous session: nothing is
+   *  processing them, and their status would block re-enqueue dedupe
+   *  forever. Called once at startup, before the enqueue loops. */
+  resetStaleRunningJobs(): number {
+    const result = this.db
+      .prepare(`UPDATE media_processing_jobs SET status = 'queued', progress = 0, message = 'Requeued after restart', error = NULL, updated_at = ? WHERE status = 'running'`)
+      .run(new Date().toISOString());
+    return result.changes;
+  }
+
   getMovieByVideoId(videoId: string): { id: string; title: string } | null {
     const row = this.db
       .prepare("SELECT id, title FROM movies WHERE LOWER(video_id) = LOWER(?)")
@@ -1330,6 +1340,9 @@ export class DatabaseClient {
         updated_at TEXT NOT NULL,
         FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
       );
+
+      CREATE INDEX IF NOT EXISTS idx_media_jobs_movie_kind ON media_processing_jobs(movie_id, kind);
+      CREATE INDEX IF NOT EXISTS idx_media_jobs_status ON media_processing_jobs(status);
     `);
 
     // Migration: per-video display name (custom title shown in the library).

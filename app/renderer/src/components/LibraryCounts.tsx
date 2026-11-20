@@ -5,6 +5,9 @@ export function useLibraryCounts(gentleUnlocked: boolean, revision: unknown) {
   React.useEffect(() => {
     let active = true;
     setData(null);
+    // The detached player window loads this same bundle but cannot call
+    // movies:summary (its sender is not the main window) — skip polling.
+    if (new URLSearchParams(window.location.search).has('playerWindow')) return;
     const update = () => { const api=window.desktopApi; if(api?.librarySummary) void api.librarySummary().then(value=>{if(active)setData(value)}).catch(()=>{}); };
     update(); const timer=window.setInterval(update,15000);
     return () => { active=false; window.clearInterval(timer); };

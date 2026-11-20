@@ -6,6 +6,9 @@ const rootDir = path.resolve(__dirname, "..");
 const binDir = path.join(rootDir, "node_modules", ".bin");
 const isWindows = process.platform === "win32";
 
+// Node >= 18.20 / 20.12 / 22 refuses to spawn .cmd/.bat shims with
+// shell:false (CVE-2024-27980), so on Windows every npm .bin shim needs
+// shell:true. Node resolves the shim through cmd.exe; args stay literal.
 function bin(name) {
   return path.join(binDir, `${name}${isWindows ? ".cmd" : ""}`);
 }
@@ -18,7 +21,7 @@ function run(command, args, extraEnv = {}) {
       NODE_ENV: "development",
       ...extraEnv
     },
-    shell: false,
+    shell: isWindows,
     stdio: "inherit"
   });
 }
@@ -67,7 +70,7 @@ async function main() {
       ...process.env,
       NODE_ENV: "development"
     },
-    shell: false,
+    shell: isWindows,
     stdio: "inherit"
   });
 
@@ -100,8 +103,21 @@ async function main() {
 
   await waitForPort("127.0.0.1", 5173, 30000);
 
-  const electron = run(bin("electron"), ["."], {
-    ELECTRON_RENDERER_URL: "http://127.0.0.1:5173"
+  // The agent host exports ELECTRON_RUN_AS_NODE=1; if it leaks through,
+  // Electron boots as plain Node and require("electron") yields nothing.
+  const electronEnv = { ...process.env };
+  delete electronEnv.ELECTRON_RUN_AS_NODE;
+  delete electronEnv.ELECTRON_NO_ATTACH_CONSOLE;
+
+  const electron = spawn(bin("electron"), ["."], {
+    cwd: rootDir,
+    env: {
+      ...electronEnv,
+      NODE_ENV: "development",
+      ELECTRON_RENDERER_URL: "http://127.0.0.1:5173"
+    },
+    shell: isWindows,
+    stdio: "inherit"
   });
   children.push(electron);
 

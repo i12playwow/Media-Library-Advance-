@@ -1785,6 +1785,7 @@ app.whenReady().then(() => {
     }
   });
   registerHandlers();
+  database.resetStaleRunningJobs();
   for (const movie of database.listMovies({ includeGentle: false, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
   database.startMissingSweepTimer();
   createWindow();

@@ -12,6 +12,22 @@ interface QueueOptions {
 export function createMediaProcessingQueue(database: DatabaseClient, options: QueueOptions) {
   let running = false;
 
+  // state() maps every returned job row through getMovie(), so each publish
+  // costs O(jobs) queries. The startup enqueue loop fires thousands of
+  // publishes in a burst — coalescing them keeps the main thread responsive
+  // (each coalesced tick still emits the freshest state).
+  const PUBLISH_COALESCE_MS = 150;
+  let publishTimer: ReturnType<typeof setTimeout> | null = null;
+  function schedulePublish(): void {
+    if (publishTimer) {
+      return;
+    }
+    publishTimer = setTimeout(() => {
+      publishTimer = null;
+      publish();
+    }, PUBLISH_COALESCE_MS);
+  }
+
   function mapJob(row: ReturnType<DatabaseClient["listMediaProcessingJobs"]>[number]): MediaProcessingJob {
     const movie = database.getMovie(row.movie_id);
     return {
@@ -38,7 +54,7 @@ export function createMediaProcessingQueue(database: DatabaseClient, options: Qu
 
   function enqueue(movieId: string, kind: MediaProcessingJobKind): string | null {
     const id = database.enqueueMediaProcessingJob(movieId, kind);
-    publish();
+    schedulePublish();
     void pump();
     return id;
   }
