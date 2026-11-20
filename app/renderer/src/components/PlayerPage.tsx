@@ -745,71 +745,80 @@ export function PlayerPage({
             <div className="player-sub-divider">Online — SubtitleCat</div>
 
 
-            <div className={`player-sub-search-row ${styles.subSearchRow}`}>
-              <select
-                className="player-sub-lang-select"
-                aria-label="Target language for subtitle search"
-                value={playerSubTargetLang}
-                onChange={(e) => { setPlayerSubTargetLang(e.target.value); setPlayerSubtitles([]); setPlayerSubHasSearched(false); }}
-              >
-                <option value="en">English</option>
-                <option value="ja">Japanese</option>
-                <option value="zh-hans">Chinese Simplified</option>
-                <option value="zh-hant">Chinese Traditional</option>
-                <option value="zh">Chinese</option>
-                <option value="ko">Korean</option>
-                <option value="fr">French</option>
-                <option value="es">Spanish</option>
-                <option value="de">German</option>
-                <option value="pt">Portuguese</option>
-                <option value="th">Thai</option>
-                <option value="vi">Vietnamese</option>
-                <option value="id">Indonesian</option>
-                <option value="ar">Arabic</option>
-                <option value="ru">Russian</option>
-                <option value="it">Italian</option>
-                <option value="all">All languages</option>
-              </select>
-              <div className={styles.searchIdBlock}>
+            <div className="player-sub-search-area">
+              <div className="player-sub-field">
+                <label className="player-sub-id-label" htmlFor="player-sub-lang-select">
+                  Subtitle language
+                </label>
+                <select
+                  id="player-sub-lang-select"
+                  className="player-sub-lang-select"
+                  aria-label="Target language for subtitle search"
+                  value={playerSubTargetLang}
+                  onChange={(e) => { setPlayerSubTargetLang(e.target.value); setPlayerSubtitles([]); setPlayerSubHasSearched(false); }}
+                >
+                  <option value="en">English</option>
+                  <option value="ja">Japanese</option>
+                  <option value="zh-hans">Chinese Simplified</option>
+                  <option value="zh-hant">Chinese Traditional</option>
+                  <option value="zh">Chinese</option>
+                  <option value="ko">Korean</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                  <option value="de">German</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="th">Thai</option>
+                  <option value="vi">Vietnamese</option>
+                  <option value="id">Indonesian</option>
+                  <option value="ar">Arabic</option>
+                  <option value="ru">Russian</option>
+                  <option value="it">Italian</option>
+                  <option value="all">All languages</option>
+                </select>
+              </div>
+              <div className="player-sub-field">
                 <label className="player-sub-id-label" htmlFor="player-sub-search-query">
                   Subtitle search ID
                 </label>
                 <input
                   id="player-sub-search-query"
-                  className={`player-sub-search-input ${styles.subSearchInput}`}
+                  className="player-sub-search-input"
                   type="text"
                   value={playerSubSearchQuery}
                   onChange={e => setPlayerSubSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && playerSubSearchQuery.trim() && !playerSubSearching) void handleSearchSubtitles(playerSubSearchQuery.trim()); }}
                   placeholder="Edit the detected DVD ID here"
                 />
               </div>
-              <button
-                className="player-sub-search-btn"
-                type="button"
-                disabled={playerSubSearching || !playerSubSearchQuery.trim()}
-                onClick={() => {
-                  if (playerSubSearchQuery.trim()) {
-                    void handleSearchSubtitles(playerSubSearchQuery.trim());
-                  }
-                }}
-              >
-                Search typed ID
-              </button>
-              <button
-                className="player-btn"
-                type="button"
-                title="Search using the detected DVD ID from the movie file"
-                disabled={playerSubSearching || !detectedSubtitleId}
-                onClick={() => {
-                  if (detectedSubtitleId) {
-                    setPlayerSubSearchQuery(detectedSubtitleId);
-                    setPlayerSubHasSearched(false);
-                    void handleSearchSubtitles(detectedSubtitleId);
-                  }
-                }}
-              >
-                Search auto ID
-              </button>
+              <div className="player-sub-actions">
+                <button
+                  className="player-sub-search-btn"
+                  type="button"
+                  disabled={playerSubSearching || !playerSubSearchQuery.trim()}
+                  onClick={() => {
+                    if (playerSubSearchQuery.trim()) {
+                      void handleSearchSubtitles(playerSubSearchQuery.trim());
+                    }
+                  }}
+                >
+                  Search typed ID
+                </button>
+                <button
+                  className="player-sub-search-btn player-sub-btn-secondary"
+                  type="button"
+                  title="Search using the detected DVD ID from the movie file"
+                  disabled={playerSubSearching || !detectedSubtitleId}
+                  onClick={() => {
+                    if (detectedSubtitleId) {
+                      setPlayerSubSearchQuery(detectedSubtitleId);
+                      setPlayerSubHasSearched(false);
+                      void handleSearchSubtitles(detectedSubtitleId);
+                    }
+                  }}
+                >
+                  Search auto ID
+                </button>
+              </div>
             </div>
 
             {!currentVideoSearchId && (

@@ -17,18 +17,6 @@
   display: inline-block;
 }
 
-.subSearchRow {
-  gap: 8px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-
-.subSearchInput {
-  flex: 1;
-  min-width: 0;
-}
-
 .candidatesWrap {
   display: flex;
   gap: 0.5rem;
