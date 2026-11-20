@@ -1,4 +1,4 @@
-import type { ActressMetadataRescanSummary, LibraryMoveResult } from "../../shared/contracts";
+import type { ActressMetadataRescanSummary, LibraryMoveResult, FtsHealth, RelinkMissingResult } from "../../shared/contracts";
 import type {
   AppShellState,
   ConvertVideoResult,
@@ -60,6 +60,11 @@ declare global {
       selectMovieModeIds: (mode: LibraryMode) => Promise<string[]>;
       removeMovies: (ids: string[], action: "library" | "trash" | "delete-permanently") => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
       removeNoPosterNonAvMovies: () => Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }>;
+      sweepMissingMovies: () => Promise<MovieRecord[]>;
+      forgetMissingMovie: (movieId: string) => Promise<{ deleted: boolean }>;
+      relinkMissingMovie: (movieId: string) => Promise<RelinkMissingResult>;
+      getFtsHealth: () => Promise<FtsHealth>;
+      rebuildFtsIndex: () => Promise<boolean>;
       listAllMovies: () => Promise<MovieRecord[]>;
       ensureMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;
       refreshMoviePosters: (movieIds: string[]) => Promise<PosterBackfillSummary>;

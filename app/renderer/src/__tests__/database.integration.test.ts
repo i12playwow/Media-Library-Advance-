@@ -135,7 +135,12 @@ describe("DatabaseClient integration", () => {
       seed("normal-one.mp4", "normal");
       seed("normal-two.mp4", "normal");
       seed("gentle-one.mp4", "gentle");
-      seed("vanished.mp4", "normal"); // row without its file — never counted
+      seed("vanished.mp4", "normal"); // row without its file — the sweep flags it, never counted
+
+      // Production reconciles the missing flag at startup before any count
+      // runs (migrate() calls reconcileMissingFlagNow); mirror that here so
+      // the flag-based filter is authoritative.
+      client.sweepMissingMovies();
 
       // Gentle locked: normal-only, matching countMovies for the same options.
       expect(client.countMoviesByMode({ includeGentle: false })).toEqual({

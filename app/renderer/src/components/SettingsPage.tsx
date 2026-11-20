@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { GuardsChainSection } from "./GuardsChainCard";
+import { LibraryHealthSection } from "./LibraryHealthSection";
 import type {
   AppShellState,
   MetadataSettings,
@@ -787,6 +788,9 @@ export function SettingsPage({
             </div>
           </div>
         </div>
+
+        {/* ── Library health ── */}
+        <LibraryHealthSection />
 
         {/* ── Guards chain ── */}
         <GuardsChainSection />

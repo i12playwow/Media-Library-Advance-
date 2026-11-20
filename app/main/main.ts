@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { BrowserWindow as BrowserWindowType } from "electron";
 
@@ -13,7 +14,7 @@ import type { ActressMetadataRescanSummary } from "../shared/contracts";
 import { DEFAULT_SCAN_OPTIONS, scanLibraries, createCancelToken, registerLocalFiles, type CancelToken } from "../services/libraryScanner";
 import { extractSubtitleLanguage } from "../services/libraryScanner";
 import { readGuardsChainState, readGuardsChainSegments } from "../services/guardsChain";
-import { SUBTITLE_EXTENSIONS } from "../shared/contracts";
+import { SUBTITLE_EXTENSIONS, VIDEO_EXTENSIONS } from "../shared/contracts";
 import { enrichMoviePoster } from "../services/metadataService";
 import { fetchSubtitleCatResults } from "../services/subtitleCat";
 import { runFfmpeg } from "../services/ffmpegService";
@@ -45,7 +46,8 @@ import type {
   MediaProcessingJob,
   MediaProcessingQueueState,
   MediaProcessingJobKind,
-  MovieLabelMode
+  MovieLabelMode,
+  RelinkMissingResult
 } from "../shared/contracts";
 
 let mainWindow: BrowserWindowType | null = null;
@@ -1100,6 +1102,66 @@ ipcMain.handle("player:windowAction",playerWindow.windowAction);
       if (targets.length === 0) return { removed: [], failed: [], cancelled: false };
       return removeMovieEntries(targets.map((target) => target.id), "library");
     });
+    ipcMain.handle("settings:getFtsHealth", (event) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      return database.getFtsHealth();
+    });
+    ipcMain.handle("settings:rebuildFtsIndex", (event) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      return database.rebuildFtsIndexNow();
+    });
+    ipcMain.handle("movies:sweepMissing", async (event) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      // sweepMissingMovies also re-syncs the search index.
+      return database.sweepMissingMovies();
+    });
+    ipcMain.handle("movies:forgetMissing", async (event, movieId: string) => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      // Only allow forgetting rows that are *currently* missing — a fresh check,
+      // not a client-trusted flag, so a compromised renderer can't use this
+      // channel to delete arbitrary registered movies.
+      const missing = database.listMissingMovies();
+      if (!missing.some((movie) => movie.id === movieId)) {
+        return { deleted: false };
+      }
+      database.deleteMovie(movieId);
+      return { deleted: true };
+    });
+    ipcMain.handle("movies:relinkMissing", async (event, movieId: string): Promise<RelinkMissingResult> => {
+      if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app.");
+      // The caller supplies only a movie id: the file picker runs here in main.
+      const movie = database.getMovie(movieId);
+      if (!movie) {
+        return { ok: false, sourcePath: null, error: "Movie not found." };
+      }
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: `Relink "${movie.title}" to its new video file`,
+        properties: ["openFile"],
+        filters: [{ name: "Video files", extensions: VIDEO_EXTENSIONS.map((ext) => ext.slice(1)) }]
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, sourcePath: null, error: null }; // user cancelled
+      }
+      const chosenPath = result.filePaths[0];
+      if (!existsSync(chosenPath)) {
+        return { ok: false, sourcePath: null, error: "Selected file does not exist." };
+      }
+      const extension = path.extname(chosenPath).toLowerCase();
+      if (!VIDEO_EXTENSIONS.includes(extension)) {
+        return {
+          ok: false,
+          sourcePath: null,
+          error: `Not a video file (${VIDEO_EXTENSIONS.join(", ")}).`
+        };
+      }
+      const relinked = database.relinkMovieSourcePath(movieId, {
+        sourcePath: chosenPath,
+        folderPath: path.dirname(chosenPath)
+      });
+      return relinked
+        ? { ok: true, sourcePath: chosenPath, error: null }
+        : { ok: false, sourcePath: null, error: "Movie not found." };
+    });
 const linkActressMovies = require("../services/actressMovies.cjs").createActressMovieLinker({ database, isGentleUnlocked: () => gentleUnlocked });
     ipcMain.handle("actress:linkMovies", async (event, name: string, ids: string[]) => { if (event.sender !== mainWindow?.webContents) throw new Error("Unavailable outside the main app."); if (activeScanToken) throw new Error("Wait for the scan to finish before linking movies."); return linkActressMovies(name, ids); });
     let actressRescan: Promise<ActressMetadataRescanSummary> | undefined;
@@ -1724,6 +1786,7 @@ app.whenReady().then(() => {
   });
   registerHandlers();
   for (const movie of database.listMovies({ includeGentle: false, limit: Number.MAX_SAFE_INTEGER })) mediaProcessingQueue.enqueueAutomatic(movie.id);
+  database.startMissingSweepTimer();
   createWindow();
 
   app.on("activate", () => {
@@ -1740,5 +1803,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  database?.stopMissingSweepTimer();
   database?.close();
 });

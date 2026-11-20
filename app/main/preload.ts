@@ -1,4 +1,4 @@
-import type { ActressMetadataRescanSummary, LibraryMoveResult } from "../shared/contracts";
+import type { ActressMetadataRescanSummary, LibraryMoveResult, FtsHealth, RelinkMissingResult } from "../shared/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppShellState,
@@ -120,6 +120,16 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
   removeMovies: (ids: string[], action: "library" | "trash" | "delete-permanently"): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> => ipcRenderer.invoke("movies:remove", ids, action),
   removeNoPosterNonAvMovies: (): Promise<{ removed: string[]; failed: Array<{ id: string; error: string }>; cancelled: boolean }> =>
     ipcRenderer.invoke("movies:removeNoPosterNonAv"),
+  sweepMissingMovies: (): Promise<MovieRecord[]> =>
+    ipcRenderer.invoke("movies:sweepMissing"),
+  forgetMissingMovie: (movieId: string): Promise<{ deleted: boolean }> =>
+    ipcRenderer.invoke("movies:forgetMissing", movieId),
+  relinkMissingMovie: (movieId: string): Promise<RelinkMissingResult> =>
+    ipcRenderer.invoke("movies:relinkMissing", movieId),
+  getFtsHealth: (): Promise<FtsHealth> =>
+    ipcRenderer.invoke("settings:getFtsHealth"),
+  rebuildFtsIndex: (): Promise<boolean> =>
+    ipcRenderer.invoke("settings:rebuildFtsIndex"),
   linkActressMovies: (name: string, ids: string[]): Promise<{ name: string; updated: string[]; failed: Array<{ id: string; error: string }> }> => ipcRenderer.invoke("actress:linkMovies", name, ids),
   rescanActressMetadata: (): Promise<ActressMetadataRescanSummary> => ipcRenderer.invoke("actress:rescanMetadata"),
   librarySummary: (): Promise<{ cataloged: number; available: number | null; missing: number | null; normal: number; gentle: number | null; scope: "all" | "normal" }> => ipcRenderer.invoke("movies:summary"),

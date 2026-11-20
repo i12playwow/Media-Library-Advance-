@@ -785,17 +785,34 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     fragments: [
       // The whole statement is pinned, COALESCEs included: the upsert's
       // conflict behavior is part of the search contract.
-      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at",
+      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at, source_missing = 0",
     ],
     exact: [
       "none",
-      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at",
+      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at, source_missing = 0",
+    ],
+  },
+  {
+    method: "sweepMissingMovies",
+    // The sweep's flag write: only rows whose fresh stat changed get a
+    // statement inside one transaction. Its `SELECT * FROM movies` read is
+    // registered in the read-path table below.
+    fragments: ["UPDATE movies SET source_missing = ? WHERE id = ?"],
+    exact: [
+      "SELECT * FROM movies",
+      "UPDATE movies SET source_missing = ? WHERE id = ?",
+      "number", "number", "object", "string",
     ],
   },
   {
     method: "deleteMovie",
     fragments: ["DELETE FROM subtitles WHERE movie_id = ?", "DELETE FROM movies WHERE id = ?"],
-    exact: ["DELETE FROM subtitles WHERE movie_id = ?", "DELETE FROM movies WHERE id = ?"],
+    exact: [
+      "DELETE FROM movies WHERE id = ?",
+      "DELETE FROM subtitles WHERE movie_id = ?",
+      // The rowid fetch feeding the search-index unindex call.
+      "SELECT rowid FROM movies WHERE id = ?",
+    ],
   },
   {
     method: "updateMovieMode",
@@ -825,6 +842,31 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     method: "setMovieDisplayName",
     fragments: ["UPDATE movies SET display_name = ?, updated_at = ? WHERE id = ?"],
     exact: ["UPDATE movies SET display_name = ?, updated_at = ? WHERE id = ?"],
+  },
+  {
+    method: "relinkMovieSourcePath",
+    // The missing-file relink: points a movie at its new video file and
+    // clears the stale missing flag. Literal-set pinning applies per
+    // registered method, so this write row and the read-path row below both
+    // pin the unit's FULL inventory (the unit absorbs the private FTS
+    // maintenance helpers — see the read-path row).
+    fragments: ["UPDATE movies SET source_path = ?, folder_path = ?, updated_at = ?, source_missing = 0 WHERE id = ?"],
+    exact: [
+      "",
+      "${input.folderPath}${subtitle.path.slice(row.folder_path.length)}",
+      "${row.title} ${row.video_id ?? \"\"} ${row.source_path} ${row.actresses_json} ${row.keywords_json}",
+      "CREATE VIRTUAL TABLE IF NOT EXISTS movie_search USING fts5(search_text, tokenize='trigram')",
+      "DELETE FROM movie_search WHERE rowid = ?",
+      "DELETE FROM movie_search WHERE rowid = ?",
+      "INSERT INTO movie_search(rowid, search_text) VALUES (?, ?)",
+      "SELECT (SELECT COUNT(*) FROM movies) AS m, (SELECT COUNT(*) FROM movie_search) AS f",
+      "SELECT id, path FROM subtitles WHERE movie_id = ?",
+      "SELECT m.rowid AS rowid FROM movies m LEFT JOIN movie_search f ON f.rowid = m.rowid WHERE f.rowid IS NULL OR f.search_text IS NOT ${FTS_TEXT_SQL}",
+      "SELECT rowid, title, video_id, source_path, actresses_json, keywords_json FROM movies WHERE id = ?",
+      "SELECT source_path, folder_path FROM movies WHERE id = ?",
+      "UPDATE movies SET source_path = ?, folder_path = ?, updated_at = ?, source_missing = 0 WHERE id = ?",
+      "UPDATE subtitles SET path = ? WHERE id = ?",
+    ],
   },
 ];
 
@@ -879,28 +921,42 @@ const literalsOf = (body: string): string[] =>
 // a new or altered literal fails naming the reader.
 const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: string[] }> = [
   {
+    method: "applySearchClause",
+    // The one search clause, shared by listMovies/countMovies/
+    // countMoviesByMode via this private helper (the lint's unit scanner
+    // folds `private` members into the preceding visible unit, so this row
+    // pins the helper directly). FTS builds 3+ character queries as a quoted
+    // MATCH phrase over movie_search (substring semantics, case-insensitive
+    // — same behavior as LIKE); shorter queries and non-FTS builds take the
+    // five-column LIKE path. search.md's query side documents both paths.
+    fragments: [
+      "rowid IN (SELECT rowid FROM movie_search WHERE movie_search MATCH ?)",
+      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
+    ],
+    exact: [
+      "rowid IN (SELECT rowid FROM movie_search WHERE movie_search MATCH ?)",
+      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
+      "%${query}%",
+    ],
+  },
+  {
     method: "listMovies",
     fragments: [
       "SELECT * FROM movies",
-      // The one search clause, shared with countMovies; search.md's query
-      // side quotes it verbatim.
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
       // No relevance sort exists; the ordering is part of the contract.
       "ORDER BY updated_at DESC, title ASC"
     ],
     exact: [
+      "source_missing = 0",
       "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
       "library_mode = 'normal'",
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
       "SELECT * FROM movies",
-      " AND ",
-      "",
+      "AND",
       "ORDER BY updated_at DESC, title ASC",
-      " ",
+      "",
       "?",
       ",",
-      "%${query}%",
       "WHERE ${clauses.join(\" AND \")}",
       "SELECT * FROM subtitles WHERE movie_id IN (${placeholders}) ORDER BY language ASC"
     ],
@@ -909,18 +965,14 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
     method: "countMovies",
     fragments: [
       "SELECT * FROM movies",
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
     ],
     exact: [
-      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
+      "source_missing = 0",
+      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
-      "library_mode = 'normal'",
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
+      "",
       "SELECT * FROM movies",
-      " AND ",
-      "",
-      " ",
-      "%${query}%",
+      "AND",
       "WHERE ${clauses.join(\" AND \")}"
     ],
   },
@@ -928,18 +980,14 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
     method: "countMoviesByMode",
     fragments: [
       "SELECT * FROM movies",
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
     ],
     exact: [
-      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'gentle'",
+      "source_missing = 0",
+      "normal", "gentle", "library_mode = 'normal'", "library_mode = 'normal'", "library_mode = 'gentle'",
       "",
       "",
-      "library_mode = 'normal'",
-      "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)",
       "SELECT * FROM movies",
-      " AND ",
-      " ",
-      "%${query}%",
+      "AND",
       "WHERE ${clauses.join(\" AND \")}",
       "gentle"
     ],
@@ -948,6 +996,17 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
     method: "getMovie",
     fragments: ["SELECT * FROM movies WHERE id = ?"],
     exact: ["SELECT * FROM movies WHERE id = ?"],
+  },
+  {
+    method: "deleteMovie",
+    // The rowid fetch that feeds the search-index unindex call before the
+    // delete-pair (the delete statements themselves are write-path rows).
+    fragments: ["SELECT rowid FROM movies WHERE id = ?"],
+    exact: [
+      "DELETE FROM movies WHERE id = ?",
+      "DELETE FROM subtitles WHERE movie_id = ?",
+      "SELECT rowid FROM movies WHERE id = ?",
+    ],
   },
   {
     method: "findMovieIdBySourcePath",
@@ -970,6 +1029,76 @@ const SEARCH_READ_PATHS: Array<{ method: string; fragments: string[]; exact: str
       "library_mode = 'normal'",
       " AND ",
       "SELECT id, title, source_path FROM movies WHERE ${clauses.join(\" AND \")}"
+    ],
+  },
+  {
+    method: "listMissingMovies",
+    // Fresh-stat review list for the missing-file sweep: no search clause,
+    // the existsSync filter runs in JS after the fetch.
+    fragments: ["SELECT * FROM movies ORDER BY updated_at DESC"],
+    exact: ["SELECT * FROM movies ORDER BY updated_at DESC"],
+  },
+  {
+    method: "sweepMissingMovies",
+    // One full fetch stats every source path exactly once; the flag write is
+    // registered in the write-path table above.
+    fragments: ["SELECT * FROM movies"],
+    exact: [
+      "SELECT * FROM movies",
+      "UPDATE movies SET source_missing = ? WHERE id = ?",
+      "number", "number", "object", "string",
+    ],
+  },
+  {
+    method: "relinkMovieSourcePath",
+    // The relink path absorbs the private FTS maintenance helpers that follow
+    // it (ftsIndexMovie, ftsUnindexMovieRowid, setupFtsSearch,
+    // ensureFtsIndexIntegrity — the lint's unit scanner folds `private`
+    // members into the preceding visible unit), so its inventory includes
+    // their statements. Reads: the old-row lookup, the per-write re-index
+    // fetch, the integrity count probe, and the drift comparison join.
+    fragments: [
+      "SELECT source_path, folder_path FROM movies WHERE id = ?",
+      "SELECT rowid, title, video_id, source_path, actresses_json, keywords_json FROM movies WHERE id = ?",
+      "SELECT (SELECT COUNT(*) FROM movies) AS m, (SELECT COUNT(*) FROM movie_search) AS f",
+      "SELECT m.rowid AS rowid FROM movies m LEFT JOIN movie_search f ON f.rowid = m.rowid WHERE f.rowid IS NULL OR f.search_text IS NOT ${FTS_TEXT_SQL}",
+    ],
+    exact: [
+      "",
+      "${input.folderPath}${subtitle.path.slice(row.folder_path.length)}",
+      "${row.title} ${row.video_id ?? \"\"} ${row.source_path} ${row.actresses_json} ${row.keywords_json}",
+      "CREATE VIRTUAL TABLE IF NOT EXISTS movie_search USING fts5(search_text, tokenize='trigram')",
+      "DELETE FROM movie_search WHERE rowid = ?",
+      "DELETE FROM movie_search WHERE rowid = ?",
+      "INSERT INTO movie_search(rowid, search_text) VALUES (?, ?)",
+      "SELECT (SELECT COUNT(*) FROM movies) AS m, (SELECT COUNT(*) FROM movie_search) AS f",
+      "SELECT id, path FROM subtitles WHERE movie_id = ?",
+      "SELECT m.rowid AS rowid FROM movies m LEFT JOIN movie_search f ON f.rowid = m.rowid WHERE f.rowid IS NULL OR f.search_text IS NOT ${FTS_TEXT_SQL}",
+      "SELECT rowid, title, video_id, source_path, actresses_json, keywords_json FROM movies WHERE id = ?",
+      "SELECT source_path, folder_path FROM movies WHERE id = ?",
+      "UPDATE movies SET source_path = ?, folder_path = ?, updated_at = ?, source_missing = 0 WHERE id = ?",
+      "UPDATE subtitles SET path = ? WHERE id = ?",
+    ],
+  },
+  {
+    method: "rebuildFtsIndexNow",
+    // Full re-index: clear the virtual table, refill from the canonical
+    // search-text expression. DELETE FROM movie_search is not a movies read.
+    fragments: [
+      "INSERT INTO movie_search(rowid, search_text) SELECT rowid, ${FTS_TEXT_SQL} FROM movies"
+    ],
+    exact: [
+      "DELETE FROM movie_search",
+      "INSERT INTO movie_search(rowid, search_text) SELECT rowid, ${FTS_TEXT_SQL} FROM movies",
+    ],
+  },
+  {
+    method: "getFtsHealth",
+    // Health readout for Settings: two COUNT probes, movies vs the index.
+    fragments: ["SELECT COUNT(*) AS c FROM movies"],
+    exact: [
+      "SELECT COUNT(*) AS c FROM movies",
+      "SELECT COUNT(*) AS c FROM movie_search",
     ],
   },
 ];

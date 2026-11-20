@@ -117,6 +117,24 @@ export interface MovieRecord {
   keywords: string[];
   subtitles: SubtitleRecord[];
   updatedAt: string;
+  sourceMissing?: boolean;
+}
+
+// Health snapshot of the search index, shown on the Settings screen.
+export interface FtsHealth {
+  available: boolean;
+  movieCount: number;
+  ftsCount: number;
+  lastSweepAt: string | null;
+  lastRebuildAt: string | null;
+  recentSweeps: Array<{ at: string; durationMs: number; changedRows: number }>;
+}
+
+// Result of relinking a missing movie to its new video file.
+export interface RelinkMissingResult {
+  ok: boolean;
+  sourcePath: string | null;
+  error: string | null;
 }
 
 export type PosterSource = "none" | "local" | "web" | "javdatabase" | "javbus" | "imdb" | "tmdb" | "javdb";

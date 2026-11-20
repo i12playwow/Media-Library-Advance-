@@ -32,6 +32,7 @@ interface MovieRow {
   actresses_json: string;
   keywords_json: string;
   updated_at: string;
+  source_missing?: number;
 }
 
 interface SubtitleRow {
@@ -96,9 +97,50 @@ const STARTER_PIN = "2468";
 const MAX_SCAN_HISTORY_ENTRIES = 10;
 const MAX_PLAYBACK_CHECKPOINTS = 200;
 
+// Missing-file sweep: cadence and settings-table keys for the persisted
+// source_missing flag and the Settings health readout.
+const MISSING_SWEEP_INTERVAL_MS = 30_000;
+const MISSING_SWEEP_LAST_KEY = "missing_sweep_last_at";
+const SWEEP_HISTORY_KEY = "missing_sweep_history";
+const SWEEP_HISTORY_CAP = 10;
+
+// Search-index (FTS5 trigram) settings-table key for the health readout.
+const FTS_LAST_REBUILD_KEY = "fts_last_rebuild_at";
+const FTS_TEXT_SQL =
+  "title || ' ' || COALESCE(video_id, '') || ' ' || source_path || ' ' || actresses_json || ' ' || keywords_json";
+
+interface SweepSample {
+  at: string;
+  durationMs: number;
+  changedRows: number;
+}
+
+export interface FtsHealth {
+  available: boolean;
+  movieCount: number;
+  ftsCount: number;
+  lastSweepAt: string | null;
+  lastRebuildAt: string | null;
+  recentSweeps: SweepSample[];
+}
+
+// FTS5 phrase query for the trigram index: quoted, with embedded double
+// quotes doubled per FTS5 string syntax, so the MATCH behaves like a
+// case-insensitive substring search — the same semantics the LIKE path has.
+function ftsPhraseQuery(query: string): string {
+  return `"${query.replace(/"/g, '""')}"`;
+}
+
 export class DatabaseClient {
 
-    getGentleShortcut(): string {
+  // True when the FTS5 trigram index is set up; when false, search falls
+  // back to the LIKE path.
+  private ftsAvailable = false;
+
+  // Timer for the periodic missing-source sweep; null when not running.
+  private missingSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  getGentleShortcut(): string {
       return this.getSetting("gentle_shortcut") || DEFAULT_GENTLE_SHORTCUT;
     }
 
@@ -226,6 +268,25 @@ export class DatabaseClient {
     this.migrate();
   }
 
+  /** Shared text-search clause for the hot list/count paths. With the
+   *  trigram FTS index available, queries of 3+ characters run as a quoted
+   *  phrase MATCH (substring semantics, case-insensitive — same behavior as
+   *  LIKE); shorter queries and non-FTS builds use the LIKE path.
+   *  Deliberately not `private`: it is a registered read unit in the
+   *  doc-drift lint, whose scanner skips `private` members. */
+  applySearchClause(clauses: string[], params: (string | number)[], query: string): void {
+    if (this.ftsAvailable && query.length >= 3) {
+      clauses.push("rowid IN (SELECT rowid FROM movie_search WHERE movie_search MATCH ?)");
+      params.push(ftsPhraseQuery(query));
+    } else {
+      clauses.push(
+        "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
+      );
+      const like = `%${query}%`;
+      params.push(like, like, like, like, like);
+    }
+  }
+
   listMovies(options?: {
     includeGentle?: boolean;
     mode?: LibraryMode;
@@ -233,7 +294,7 @@ export class DatabaseClient {
     limit?: number;
     offset?: number;
   }): MovieRecord[] {
-    const clauses: string[] = [];
+    const clauses: string[] = ["source_missing = 0"];
     const params: (string | number)[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
@@ -245,28 +306,22 @@ export class DatabaseClient {
     }
 
     if (query) {
-      clauses.push(
-        "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
-      );
-      const like = `%${query}%`;
-      params.push(like, like, like, like, like);
+      this.applySearchClause(clauses, params, query);
     }
 
     const sql = [
       "SELECT * FROM movies",
-      clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+      `WHERE ${clauses.join(" AND ")}`,
       "ORDER BY updated_at DESC, title ASC"
     ]
-      .filter(Boolean)
       .join(" ");
 
     const movieRows = this.db.prepare(sql).all(...params) as MovieRow[];
     if (movieRows.length === 0) return [];
 
-    const visibleRows = movieRows.filter((row) => existsSync(row.source_path));
     const limit = options?.limit ?? 200;
     const offset = options?.offset ?? 0;
-    const pagedRows = visibleRows.slice(offset, offset + limit);
+    const pagedRows = movieRows.slice(offset, offset + limit);
     const movieIds = pagedRows.map((r) => r.id);
     const placeholders = movieIds.map(() => "?").join(",");
     if (movieIds.length === 0) return [];
@@ -287,7 +342,7 @@ export class DatabaseClient {
   }
 
   countMovies(options?: { includeGentle?: boolean; mode?: LibraryMode; query?: string }): number {
-    const clauses: string[] = [];
+    const clauses: string[] = ["source_missing = 0"];
     const params: string[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
@@ -299,28 +354,23 @@ export class DatabaseClient {
       clauses.push("library_mode = 'normal'");
     }
     if (query) {
-      clauses.push(
-        "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
-      );
-      const like = `%${query}%`;
-      params.push(like, like, like, like, like);
+      this.applySearchClause(clauses, params, query);
     }
 
     const sql = [
       "SELECT * FROM movies",
-      clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
+      `WHERE ${clauses.join(" AND ")}`
     ]
-      .filter(Boolean)
       .join(" ");
 
     const rows = this.db.prepare(sql).all(...params) as MovieRow[];
-    return rows.filter((row) => existsSync(row.source_path)).length;
+    return rows.length;
   }
 
   // Same filter family as countMovies, but one scan reports the whole
   // total/normal/gentle split — the sidebar snapshot's full-library numbers.
   countMoviesByMode(options?: { includeGentle?: boolean; mode?: LibraryMode; query?: string }): MovieModeCounts {
-    const clauses: string[] = [];
+    const clauses: string[] = ["source_missing = 0"];
     const params: string[] = [];
     const includeGentle = options?.includeGentle ?? false;
     const query = options?.query?.trim() ?? "";
@@ -332,18 +382,13 @@ export class DatabaseClient {
       clauses.push("library_mode = 'normal'");
     }
     if (query) {
-      clauses.push(
-        "(title LIKE ? OR video_id LIKE ? OR source_path LIKE ? OR actresses_json LIKE ? OR keywords_json LIKE ?)"
-      );
-      const like = `%${query}%`;
-      params.push(like, like, like, like, like);
+      this.applySearchClause(clauses, params, query);
     }
 
     const sql = [
       "SELECT * FROM movies",
-      clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
+      `WHERE ${clauses.join(" AND ")}`
     ]
-      .filter(Boolean)
       .join(" ");
 
     const rows = this.db.prepare(sql).all(...params) as MovieRow[];
@@ -351,9 +396,6 @@ export class DatabaseClient {
     let normal = 0;
     let gentle = 0;
     for (const row of rows) {
-      if (!existsSync(row.source_path)) {
-        continue;
-      }
       total += 1;
       if (row.library_mode === "gentle") {
         gentle += 1;
@@ -388,6 +430,9 @@ export class DatabaseClient {
 
   upsertMovie(movie: MovieInput): void {
     const now = new Date().toISOString();
+    // A scan only registers files that exist on disk, so a re-scan of a
+    // previously missing movie clears its stale missing flag (the
+    // `source_missing = 0` in the conflict branch below).
     this.db
       .prepare(
         `
@@ -413,7 +458,8 @@ export class DatabaseClient {
             END,
             actresses_json = excluded.actresses_json,
             keywords_json = excluded.keywords_json,
-            updated_at = excluded.updated_at
+            updated_at = excluded.updated_at,
+            source_missing = 0
         `
       )
       .run({
@@ -431,6 +477,7 @@ export class DatabaseClient {
         keywordsJson: JSON.stringify(movie.keywords),
         updatedAt: now
       });
+    this.ftsIndexMovie(movie.id);
   }
 
   replaceSubtitles(movieId: string, subtitles: SubtitleRecord[]): void {
@@ -469,8 +516,283 @@ export class DatabaseClient {
   }
 
   deleteMovie(id: string): void {
+    const row = this.db
+      .prepare("SELECT rowid FROM movies WHERE id = ?")
+      .get(id) as { rowid: number } | undefined;
     this.db.prepare("DELETE FROM subtitles WHERE movie_id = ?").run(id);
     this.db.prepare("DELETE FROM movies WHERE id = ?").run(id);
+    this.ftsUnindexMovieRowid(row?.rowid);
+  }
+
+  // ── Missing-file sweep ───────────────────────────────────────────────────
+  // The sweep persists each row's "source file is gone" state into the
+  // source_missing column so list/count can filter in SQL without a per-row
+  // stat, and keeps the search index honest (see ensureFtsIndexIntegrity).
+
+  /** Movies whose source file no longer exists on disk. Always performs a
+   *  fresh stat so the result is authoritative — used by the consistency
+   *  sweep and the missing-file review, not the hot search path. */
+  listMissingMovies(): MovieRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM movies ORDER BY updated_at DESC")
+      .all() as MovieRow[];
+    return rows
+      .filter((row) => !existsSync(row.source_path))
+      .map((row) => this.hydrateMovie(row, this.getSubtitles(row.id)));
+  }
+
+  /** Fresh-stat every source path exactly once, persist the outcome into the
+   *  source_missing flag in one transaction (only changed rows are written),
+   *  and re-sync the search index if any write path drifted from it. Returns
+   *  the missing movies, hydrated from the same stat pass. */
+  sweepMissingMovies(): MovieRecord[] {
+    const sweepStarted = Date.now();
+    const rows = this.db
+      .prepare("SELECT * FROM movies")
+      .all() as Array<MovieRow & { source_missing?: number }>;
+    const changed: Array<{ id: string; missing: number }> = [];
+    const missingRows: MovieRow[] = [];
+    for (const row of rows) {
+      const missing = !existsSync(row.source_path);
+      if (missing) {
+        missingRows.push(row);
+      }
+      if (missing !== Boolean(row.source_missing)) {
+        changed.push({ id: row.id, missing: missing ? 1 : 0 });
+      }
+    }
+    if (changed.length > 0) {
+      const update = this.db.prepare("UPDATE movies SET source_missing = ? WHERE id = ?");
+      const apply = this.db.transaction(() => {
+        for (const entry of changed) {
+          update.run(entry.missing, entry.id);
+        }
+      });
+      apply();
+    }
+    // Safety net for the trigger-less FTS maintenance: re-sync the search
+    // index if any write path drifted from it. Cheap when healthy.
+    try {
+      this.ensureFtsIndexIntegrity();
+    } catch {
+      // Advisory — a transient failure here must never break the sweep.
+    }
+    const finishedAt = new Date().toISOString();
+    this.setSetting(MISSING_SWEEP_LAST_KEY, finishedAt);
+    this.recordSweepSample(finishedAt, Date.now() - sweepStarted, changed.length);
+    return missingRows.map((row) => this.hydrateMovie(row, this.getSubtitles(row.id)));
+  }
+
+  /** Append one sweep sample to the capped history on the settings table,
+   *  newest first, so getFtsHealth() can show whether the library is stable
+   *  or churning. Corrupt entries are ignored; the write is best-effort. */
+  private recordSweepSample(finishedAt: string, durationMs: number, changedRows: number): void {
+    try {
+      const samples: SweepSample[] = [
+        { at: finishedAt, durationMs, changedRows },
+        ...this.readSweepHistory()
+      ];
+      this.setSetting(SWEEP_HISTORY_KEY, JSON.stringify(samples.slice(0, SWEEP_HISTORY_CAP)));
+    } catch {
+      // Advisory — the sweep already happened; recording it is optional.
+    }
+  }
+
+  private readSweepHistory(): SweepSample[] {
+    const raw = this.getSetting(SWEEP_HISTORY_KEY);
+    if (!raw) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed.filter(
+        (s): s is SweepSample =>
+          typeof s === "object" && s !== null &&
+          typeof (s as SweepSample).at === "string" &&
+          typeof (s as SweepSample).durationMs === "number" &&
+          typeof (s as SweepSample).changedRows === "number"
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /** One-shot flag reconciliation (used at startup); returns nothing. */
+  reconcileMissingFlagNow(): void {
+    this.sweepMissingMovies();
+  }
+
+  /** Start the periodic background sweep that keeps source_missing current.
+   *  Called from the main process once the window exists. */
+  startMissingSweepTimer(): void {
+    if (this.missingSweepTimer) {
+      return;
+    }
+    this.missingSweepTimer = setInterval(() => {
+      try {
+        this.sweepMissingMovies();
+      } catch {
+        // The sweep is advisory; never let it crash the interval.
+      }
+    }, MISSING_SWEEP_INTERVAL_MS);
+  }
+
+  stopMissingSweepTimer(): void {
+    if (this.missingSweepTimer) {
+      clearInterval(this.missingSweepTimer);
+      this.missingSweepTimer = null;
+    }
+  }
+
+  /** Point a movie at a new on-disk location after its file moved. Updates
+   *  source_path and folder_path, clears the missing flag, and remaps
+   *  subtitle rows that referenced the old folder (relative-name matches —
+   *  the common move-the-whole-folder case). Returns false when the movie
+   *  does not exist. */
+  relinkMovieSourcePath(id: string, input: { sourcePath: string; folderPath: string }): boolean {
+    const row = this.db
+      .prepare("SELECT source_path, folder_path FROM movies WHERE id = ?")
+      .get(id) as { source_path: string; folder_path: string } | undefined;
+    if (!row) {
+      return false;
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `
+          UPDATE movies
+          SET source_path = ?, folder_path = ?, updated_at = ?, source_missing = 0
+          WHERE id = ?
+        `
+      )
+      .run(input.sourcePath, input.folderPath, now, id);
+    const subtitles = this.db
+      .prepare("SELECT id, path FROM subtitles WHERE movie_id = ?")
+      .all(id) as Array<{ id: string; path: string }>;
+    for (const subtitle of subtitles) {
+      if (subtitle.path.startsWith(row.folder_path)) {
+        const nextSubtitlePath = `${input.folderPath}${subtitle.path.slice(row.folder_path.length)}`;
+        this.db
+          .prepare("UPDATE subtitles SET path = ? WHERE id = ?")
+          .run(nextSubtitlePath, subtitle.id);
+      }
+    }
+    this.ftsIndexMovie(id);
+    return true;
+  }
+
+  // ── Search index (FTS5 trigram) ──────────────────────────────────────────
+
+  /** Create the FTS index when the SQLite build supports it; otherwise the
+   *  LIKE fallback stays active and search behavior is identical. */
+  private setupFtsSearch(): void {
+    try {
+      this.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS movie_search USING fts5(search_text, tokenize='trigram')");
+      this.ftsAvailable = true;
+      this.ensureFtsIndexIntegrity();
+    } catch {
+      this.ftsAvailable = false;
+    }
+  }
+
+  /** Replace the FTS row for one movie (no-op when FTS is unavailable). */
+  private ftsIndexMovie(movieId: string): void {
+    if (!this.ftsAvailable) {
+      return;
+    }
+    const row = this.db
+      .prepare("SELECT rowid, title, video_id, source_path, actresses_json, keywords_json FROM movies WHERE id = ?")
+      .get(movieId) as
+      | { rowid: number; title: string; video_id: string | null; source_path: string; actresses_json: string; keywords_json: string }
+      | undefined;
+    if (!row) {
+      return;
+    }
+    const searchText = `${row.title} ${row.video_id ?? ""} ${row.source_path} ${row.actresses_json} ${row.keywords_json}`;
+    this.db.prepare("DELETE FROM movie_search WHERE rowid = ?").run(row.rowid);
+    this.db.prepare("INSERT INTO movie_search(rowid, search_text) VALUES (?, ?)").run(row.rowid, searchText);
+  }
+
+  /** Remove a movie's row from the FTS index (call after DELETE FROM movies). */
+  private ftsUnindexMovieRowid(rowid: number | undefined): void {
+    if (!this.ftsAvailable || rowid === undefined) {
+      return;
+    }
+    this.db.prepare("DELETE FROM movie_search WHERE rowid = ?").run(rowid);
+  }
+
+  /** Re-sync movie_search when it has drifted from movies. The index is
+   *  maintained per-write (this SQLite build rejects FTS triggers), so any
+   *  write path that forgets to re-index surfaces here. Returns true when a
+   *  rebuild happened, and stamps fts_last_rebuild_at for getFtsHealth(). */
+  private ensureFtsIndexIntegrity(): boolean {
+    if (!this.ftsAvailable) {
+      return false;
+    }
+    // Fast path: unequal counts always mean drift (deleted or extra rows).
+    const counts = this.db
+      .prepare("SELECT (SELECT COUNT(*) FROM movies) AS m, (SELECT COUNT(*) FROM movie_search) AS f")
+      .get() as { m: number; f: number };
+    if (counts.m !== counts.f) {
+      return this.rebuildFtsIndexNow();
+    }
+    // Equal counts can still hide stale text or swapped rowids, so compare
+    // the indexed text against the canonical expression per row.
+    const drifted = this.db
+      .prepare(
+        `SELECT m.rowid AS rowid
+         FROM movies m
+         LEFT JOIN movie_search f ON f.rowid = m.rowid
+         WHERE f.rowid IS NULL OR f.search_text IS NOT ${FTS_TEXT_SQL}`
+      )
+      .all() as Array<{ rowid: number }>;
+    if (drifted.length === 0) {
+      return false;
+    }
+    return this.rebuildFtsIndexNow();
+  }
+
+  /** Full index rebuild, on demand: re-indexes every movie and stamps
+   *  fts_last_rebuild_at for getFtsHealth(). Returns false when FTS is
+   *  unavailable (the LIKE fallback needs no index). */
+  rebuildFtsIndexNow(): boolean {
+    if (!this.ftsAvailable) {
+      return false;
+    }
+    this.db.prepare("DELETE FROM movie_search").run();
+    this.db
+      .prepare(`INSERT INTO movie_search(rowid, search_text) SELECT rowid, ${FTS_TEXT_SQL} FROM movies`)
+      .run();
+    this.setSetting(FTS_LAST_REBUILD_KEY, new Date().toISOString());
+    return true;
+  }
+
+  /** Health snapshot of the search index for the Settings screen: row
+   *  counts plus persisted last-sweep/last-rebuild timestamps. */
+  getFtsHealth(): FtsHealth {
+    const movieCount = (this.db.prepare("SELECT COUNT(*) AS c FROM movies").get() as { c: number }).c;
+    if (!this.ftsAvailable) {
+      return {
+        available: false,
+        movieCount,
+        ftsCount: 0,
+        lastSweepAt: this.getSetting(MISSING_SWEEP_LAST_KEY),
+        lastRebuildAt: this.getSetting(FTS_LAST_REBUILD_KEY),
+        recentSweeps: this.readSweepHistory()
+      };
+    }
+    const ftsCount = (this.db.prepare("SELECT COUNT(*) AS c FROM movie_search").get() as { c: number }).c;
+    return {
+      available: true,
+      movieCount,
+      ftsCount,
+      lastSweepAt: this.getSetting(MISSING_SWEEP_LAST_KEY),
+      lastRebuildAt: this.getSetting(FTS_LAST_REBUILD_KEY),
+      recentSweeps: this.readSweepHistory()
+    };
   }
 
   // Library entries with no poster AND no JAV-style video ID. Both conditions
@@ -517,6 +839,8 @@ export class DatabaseClient {
         new Date().toISOString(),
         id
       );
+    // source_path feeds the search text, so keep the FTS row in step.
+    this.ftsIndexMovie(id);
   }
 
   updateMoviePoster(
@@ -909,7 +1233,8 @@ export class DatabaseClient {
       actresses: this.safeJsonArray(row.actresses_json),
       keywords: this.safeJsonArray(row.keywords_json),
       subtitles,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
+      sourceMissing: row.source_missing === 1
     };
   }
 
@@ -1063,6 +1388,22 @@ export class DatabaseClient {
       CREATE INDEX IF NOT EXISTS idx_subtitles_movie_id
         ON subtitles(movie_id);
     `);
+
+    // Persisted missing-source flag: 1 when the sweep found source_path gone.
+    // Lets the hot search path filter in SQL without any per-row stat.
+    this.ensureColumn(
+      "movies",
+      "source_missing",
+      "ALTER TABLE movies ADD COLUMN source_missing INTEGER NOT NULL DEFAULT 0"
+    );
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_movies_missing ON movies(source_missing) WHERE source_missing = 1"
+    );
+    // First run after an upgrade (or after scans done by an older build):
+    // reconcile the flag against the real filesystem so search never shows
+    // stale results before the first background sweep fires.
+    this.reconcileMissingFlagNow();
+    this.setupFtsSearch();
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS actress_photos (
