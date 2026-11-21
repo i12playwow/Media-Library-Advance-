@@ -97,7 +97,7 @@ function createWindow(): void {
     height: 920,
     minWidth: 1180,
     minHeight: 760,
-    title: "MLA+",
+    title: `MLA+ ${app.getVersion()}`,
     icon: resolveAppIconPath(),
     backgroundColor: "#0f1217",
     // Frameless look: the OS title bar is hidden, native minimize/maximize/

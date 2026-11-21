@@ -2,10 +2,19 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+// Baked into the renderer bundle: package version + build date, shown in
+// Settings → System. The version lives in package.json (electron-builder
+// stamps the installer with the same value).
+const pkg = require("./package.json") as { version?: string };
+const buildStamp = `${pkg.version ?? "unknown"} · built ${new Date().toISOString().slice(0, 10)}`;
+
 export default defineConfig({
   base: "./",
   root: path.resolve(__dirname, "app/renderer"),
   plugins: [react()],
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp),
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

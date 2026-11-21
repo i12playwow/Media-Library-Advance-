@@ -22,6 +22,11 @@ interface OrganizationPreview {
   fileName: string;
 }
 
+// Baked at build time by vite's define (see vite.config.ts): the package
+// version and the build date, shown in Settings → System.
+declare const __BUILD_STAMP__: string;
+const BUILD_STAMP = __BUILD_STAMP__;
+
 interface GentleSaveStatus {
   message: string;
   tone: "success" | "error";
@@ -802,6 +807,7 @@ export function SettingsPage({
           <ul className="plain-list">
             <li>Platform: {appState.platform}</li>
             <li>Version: {appState.version}</li>
+            <li>Build: {BUILD_STAMP}</li>
             <li>Gentle unlocked: {appState.gentleUnlocked ? "Yes" : "No"}</li>
             <li>Default in-app unlock shortcut: Ctrl+Alt+D</li>
           </ul>

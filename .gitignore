@@ -137,3 +137,5 @@ recovery-output/
 
 # WorkBuddy AI local session data (agent memory, not project code)
 .workbuddy-ai/
+scripts/7za-shim/7za-real.exe
+scripts/7za-shim/7za-real.exe.bak

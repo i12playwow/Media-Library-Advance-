@@ -20,6 +20,7 @@ interface AppTopBarProps {
   lastScanSummaryInvalidFiles: InvalidFileEntry[];
   getRejectedStatusLabel: (status: "incomplete" | "corrupt" | "invalid") => string;
   displayName?: string;
+  version?: string;
 }
 
 export function AppTopBar({
@@ -36,6 +37,7 @@ export function AppTopBar({
   lastScanSummaryInvalidFiles,
   getRejectedStatusLabel: rejectedLabel,
   displayName,
+  version,
 }: AppTopBarProps) {
   const activeJobs = processingQueue.jobs.filter((job) => job.status === "queued" || job.status === "running");
   const conversionJobs = activeJobs.filter((job) => job.kind === "convert-mp4");
@@ -50,7 +52,7 @@ export function AppTopBar({
     <>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Local only</p>
+          <p className="eyebrow">Local only · v{version}</p>
           <h2>{displayName ? `${displayName}'s library` : "No external API server"}</h2>
         </div>
         <div className="topbar-actions">

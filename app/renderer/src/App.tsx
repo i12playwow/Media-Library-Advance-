@@ -681,6 +681,7 @@ export function App() {
           onOpenBrowser={desktopApi.openBrowser ? openBrowser : undefined}
           gentleUnlocked={appState?.gentleUnlocked ?? false}
           displayName={appState?.displayName}
+          version={appState?.version}
           scanProgress={scanProgress}
           scanStageLabel={scanStageLabel}
           processingQueue={processingQueue}
