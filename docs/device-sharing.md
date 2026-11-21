@@ -6,16 +6,9 @@ Phones, tablets, and computers on the same Wi-Fi can browse, search, and stream 
 
 The listener uses TCP 48321, falling back to an available port if occupied. Links contain a fresh random 192-bit secret per sharing session. Access is restricted to private-network addresses. Do not publish the link. Windows firewall access should be limited to the app, Private profile, and LocalSubnet.
 
-## Build and verify
+## Verify
 
-The installed app has newer features than the old TypeScript checkout. Preserve that baseline in `installed-update`; do not replace it with the older full-app build.
-
-Feature sources: `app/services/deviceShare.cjs` and `app/renderer/device-share/`.
-
-1. Run `node scripts/prepare-device-share.cjs` to copy feature sources and wire main/preload/renderer into the installed-version staging build.
-2. Run `node --test tests/deviceShare.test.cjs` (requires permission to use loopback HTTP).
-3. Run `node diagnostics/smoke-sharing.cjs` with a temporary profile. This verifies desktop controls, copy link, phone layout, real playback/seeking, search, protected-library exclusion, stop, and link rotation.
-4. Package the staging build with `@electron/asar`, keeping native modules and media binaries unpacked. Repeat smoke tests against the resulting archive before installing.
+Run `node --test tests/deviceShare.test.cjs` (requires loopback HTTP permission) and `node diagnostics/smoke-sharing.cjs` with a temporary profile to exercise desktop controls, phone playback, and link rotation.
 
 The feature does not mount phone storage, provide SMB, or copy videos to phones. It provides browser streaming.
 

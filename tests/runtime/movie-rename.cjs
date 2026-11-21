@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 async function main() {
-  const root = path.resolve(process.argv[2] || "installed-update");
+  const root = path.resolve(process.argv[2] || ".");
   const profile = path.resolve("diagnostics", "movie-rename-" + Date.now());
   const app = await _electron.launch({
     executablePath: process.env.MLA_TEST_EXECUTABLE || require("electron"),
