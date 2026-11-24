@@ -278,6 +278,14 @@ function createInAppBrowser({ app, BrowserWindow, WebContentsView, ipcMain, sess
       } finally { choosingFolder = false; }
     } else if (action === 'resumeDownloads') downloads.resume();
     else if (action === 'cancelDownloads') downloads.cancel();
+    else if (action === 'pauseEntry') downloads.pauseEntry(String(value));
+    else if (action === 'resumeEntry') downloads.resumeEntry(String(value));
+    else if (action === 'cancelEntry') downloads.cancelEntry(String(value));
+    else if (action === 'retryEntry') downloads.retryEntry(String(value));
+    else if (action === 'removeEntry') downloads.removeEntry(String(value));
+    else if (action === 'clearFinished') downloads.clearFinished();
+    else if (action === 'openEntryFile') await downloads.openFile(String(value), shell);
+    else if (action === 'showEntryInFolder') await downloads.showInFolder(String(value), shell);
     else if (action === 'ready') publish();
   });
 
@@ -306,6 +314,7 @@ function createInAppBrowser({ app, BrowserWindow, WebContentsView, ipcMain, sess
     downloads = createDownloadQueue({
       fetchFile: (url, signal) => browserSession.fetch(url, { credentials: 'include', signal }),
       publish,
+      shell,
       verify: url => {
         const valid = webUrl(url);
         if (valid) {

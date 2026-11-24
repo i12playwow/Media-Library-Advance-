@@ -22,6 +22,7 @@ const links = document.getElementById('download-links');
 const start = document.getElementById('start-downloads');
 const resume = document.getElementById('resume-downloads');
 const cancel = document.getElementById('cancel-downloads');
+const clearFinishedButton = document.getElementById('clear-finished-downloads');
 const summary = document.getElementById('download-summary');
 const list = document.getElementById('download-list');
 const findLinks = document.getElementById('find-download-links');
@@ -159,6 +160,7 @@ newTab.addEventListener('click', () => command('newTab'));
 start.addEventListener('click', () => command('startDownloads', links.value));
 resume.addEventListener('click', () => command('resumeDownloads'));
 cancel.addEventListener('click', () => command('cancelDownloads'));
+if (clearFinishedButton) clearFinishedButton.addEventListener('click', () => command('clearFinished'));
 document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't') {
     event.preventDefault();
@@ -233,15 +235,82 @@ toolbar.onState(state => {
   resume.textContent = queue.paused === 'verification' ? 'Resume after verification' : 'Resume downloads';
   cancel.disabled = !queue.running && !queue.paused;
   if (panel.hidden) return;
-  const completed = queue.entries.filter(entry => entry.status === 'completed').length;
-  summary.textContent = pauseMessage || (queue.folder ? `${completed} of ${queue.entries.length} saved to ${queue.folder}` : '');
-  list.replaceChildren(...queue.entries.map(entry => {
-    const row = document.createElement('li');
-    const amount = entry.total ? ` ${Math.min(100, Math.floor(entry.received / entry.total * 100))}%` : '';
-    row.textContent = `${entry.name || entry.url} · ${entry.status}${entry.status === 'downloading' ? amount : ''}${entry.error ? ` · ${entry.error}` : ''}`;
-    return row;
-  }));
+  // --- Download manager panel ---
+  const stats = queue.summary ?? {};
+  const totalText = stats.total
+    ? `${formatBytes(stats.received)} / ${formatBytes(stats.total)}`
+    : formatBytes(stats.received);
+  const speedText = stats.speed ? ` · ${formatBytes(stats.speed)}/s` : '';
+  summary.textContent = pauseMessage
+    || (queue.folder
+      ? `${stats.completed ?? 0} completed · ${stats.active ?? 0} active · ${stats.failed ?? 0} failed · ${totalText}${speedText}`
+      : '');
+  clearFinishedButton.hidden = !queue.entries.some(entry => ['completed', 'cancelled', 'failed'].includes(entry.status));
+  list.replaceChildren(...queue.entries.map(entry => managerRow(entry)));
 });
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function managerRow(entry) {
+  const row = document.createElement('li');
+  row.className = `download-row ${entry.status}`;
+
+  const info = document.createElement('div');
+  info.className = 'download-info';
+  const name = document.createElement('span');
+  name.className = 'download-name';
+  name.textContent = entry.name || entry.url;
+  name.title = entry.url;
+  const meta = document.createElement('span');
+  meta.className = 'download-meta';
+  const percent = entry.total ? Math.min(100, Math.floor(entry.received / entry.total * 100)) : 0;
+  const sizeText = entry.total ? `${formatBytes(entry.received)} / ${formatBytes(entry.total)}` : formatBytes(entry.received);
+  const speedText = entry.status === 'downloading' && entry.speed ? ` · ${formatBytes(entry.speed)}/s` : '';
+  meta.textContent = `${entry.status}${entry.status === 'downloading' ? ` ${percent}% · ${sizeText}${speedText}` : entry.status === 'completed' ? ` · ${formatBytes(entry.received)}` : ''}${entry.error ? ` · ${entry.error}` : ''}`;
+  info.append(name, meta);
+
+  const bar = document.createElement('div');
+  bar.className = 'download-bar';
+  const fill = document.createElement('div');
+  fill.className = 'download-bar-fill';
+  fill.style.width = `${percent}%`;
+  bar.append(fill);
+
+  const actions = document.createElement('div');
+  actions.className = 'download-actions-row';
+  const buttonFor = (label, action, title, enabled) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute('aria-label', `${title}: ${entry.name || entry.url}`);
+    button.disabled = !enabled;
+    button.addEventListener('click', () => command(action, entry.id));
+    return button;
+  };
+  if (entry.status === 'downloading' || entry.status === 'queued') {
+    actions.append(buttonFor('⏸', 'pauseEntry', 'Pause', entry.status === 'downloading'));
+    actions.append(buttonFor('✕', 'cancelEntry', 'Cancel', true));
+  } else if (entry.status === 'paused') {
+    actions.append(buttonFor('▶', 'resumeEntry', 'Resume', true));
+    actions.append(buttonFor('✕', 'cancelEntry', 'Cancel', true));
+  } else if (entry.status === 'failed' || entry.status === 'cancelled') {
+    actions.append(buttonFor('↻', 'retryEntry', 'Retry', true));
+    actions.append(buttonFor('🗑', 'removeEntry', 'Remove from list', true));
+  } else if (entry.status === 'completed') {
+    actions.append(buttonFor('📂', 'openEntryFile', 'Open file', true));
+    actions.append(buttonFor('📁', 'showEntryInFolder', 'Show in folder', true));
+  }
+
+  row.append(info, bar, actions);
+  return row;
+}
 
 toolbar.onFocusAddress(() => { address.focus(); address.select(); });
 command('ready');
