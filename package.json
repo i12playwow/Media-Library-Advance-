@@ -1,6 +1,6 @@
 {
     "name": "medialibrary-plus",
-    "version": "1.1.0",
+    "version": "2.0.0",
     "description": "MLA+ desktop media library app",
     "main": "dist/main/main.js",
     "engines": {
