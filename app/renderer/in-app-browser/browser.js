@@ -6,6 +6,17 @@ const reload = document.getElementById('reload');
 const back = document.getElementById('back');
 const forward = document.getElementById('forward');
 const downloads = document.getElementById('downloads');
+const newTab = document.getElementById('new-tab');
+const tabsEl = document.getElementById('tabs');
+const downloadVideo = document.getElementById('download-video');
+const videoPanel = document.getElementById('video-panel');
+const findVideos = document.getElementById('find-videos');
+const videoStatus = document.getElementById('video-status');
+const videoPicker = document.getElementById('video-picker');
+const videoChoices = document.getElementById('video-choices');
+const selectVideos = document.getElementById('select-videos');
+const addVideos = document.getElementById('add-videos');
+const videoLinks = document.getElementById('video-links');
 const panel = document.getElementById('download-panel');
 const links = document.getElementById('download-links');
 const start = document.getElementById('start-downloads');
@@ -21,10 +32,17 @@ const selectLinks = document.getElementById('select-download-links');
 const addLinks = document.getElementById('add-download-links');
 let lastAddress = '';
 let pickerRevision = 0;
+let videoRevision = 0;
+let adBlockCount = 0;
 
 function updateSelection() {
   addLinks.disabled = !choices.querySelector('input:checked');
   selectLinks.textContent = choices.querySelector('input:not(:checked)') ? 'Select all' : 'Clear selection';
+}
+
+function updateVideoSelection() {
+  addVideos.disabled = !videoChoices.querySelector('input:checked');
+  selectVideos.textContent = videoChoices.querySelector('input:not(:checked)') ? 'Select all' : 'Clear selection';
 }
 
 findLinks.addEventListener('click', async () => {
@@ -69,6 +87,62 @@ addLinks.addEventListener('click', () => {
   picker.hidden = true;
 });
 
+// --- Video finder (offline saving) ---
+downloadVideo.addEventListener('click', () => {
+  const showing = !videoPanel.hidden;
+  videoPanel.hidden = showing;
+  panel.hidden = true;
+  if (!showing) {
+    videoStatus.textContent = 'Scanning the page for videos…';
+    void scanVideos();
+  }
+});
+findVideos.addEventListener('click', () => void scanVideos());
+
+async function scanVideos() {
+  const revision = ++videoRevision;
+  videoPicker.hidden = true;
+  videoChoices.replaceChildren();
+  videoStatus.textContent = 'Scanning the page for videos…';
+  try {
+    const results = await toolbar.command('findVideos');
+    if (revision !== videoRevision) return;
+    videoStatus.textContent = results.length
+      ? `${results.length} video source${results.length === 1 ? '' : 's'} found. Select the ones to save offline.`
+      : 'No video sources found on this page. Play the video once, then scan again.';
+    for (const result of results) {
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = result.url;
+      label.title = result.url;
+      label.append(checkbox, result.label);
+      videoChoices.append(label);
+    }
+    videoPicker.hidden = !results.length;
+    updateVideoSelection();
+  } catch (error) {
+    if (revision === videoRevision) videoStatus.textContent = error.message?.replace(/^Error invoking remote method '[^']+': Error: /, '') || 'Could not scan this page.';
+  }
+}
+videoChoices.addEventListener('change', updateVideoSelection);
+selectVideos.addEventListener('click', () => {
+  const checked = Boolean(videoChoices.querySelector('input:not(:checked)'));
+  for (const input of videoChoices.querySelectorAll('input')) input.checked = checked;
+  updateVideoSelection();
+});
+addVideos.addEventListener('click', () => {
+  const selected = Array.from(videoChoices.querySelectorAll('input:checked'), input => input.value);
+  const combined = [...new Set([...videoLinks.value.split(/\r?\n/).map(link => link.trim()).filter(Boolean), ...selected])];
+  if (combined.length > 100 || combined.join('\n').length > 200_000) {
+    videoStatus.textContent = 'The queue can hold up to 100 links. Remove some before adding more.';
+    return;
+  }
+  videoLinks.value = combined.join('\n');
+  videoStatus.textContent = `${selected.length} selected · ${combined.length} video links ready. Open Downloads to start saving.`;
+  videoPicker.hidden = true;
+});
+
 function command(action, value) {
   void toolbar.command(action, value).catch(error => {
     const target = panel.hidden ? status : summary;
@@ -81,17 +155,55 @@ document.querySelector('form').addEventListener('submit', event => {
   command('navigate', address.value);
 });
 for (const button of [back, forward, reload, downloads]) button.addEventListener('click', () => command(button.id));
+newTab.addEventListener('click', () => command('newTab'));
 start.addEventListener('click', () => command('startDownloads', links.value));
 resume.addEventListener('click', () => command('resumeDownloads'));
 cancel.addEventListener('click', () => command('cancelDownloads'));
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't') {
+    event.preventDefault();
+    command('newTab');
+  }
+});
 
 toolbar.onState(state => {
+  if (state.tabs) {
+    tabsEl.replaceChildren(...state.tabs.map(tab => {
+      const item = document.createElement('div');
+      item.className = `tab${tab.active ? ' active' : ''}`;
+      item.setAttribute('role', 'tab');
+      item.setAttribute('aria-selected', String(tab.active));
+      item.dataset.tabId = String(tab.id);
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = `${tab.loading ? '⏳ ' : ''}${tab.title}`;
+      item.append(title);
+      if (tab.canClose) {
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'close';
+        close.setAttribute('aria-label', `Close ${tab.title}`);
+        close.textContent = '×';
+        close.addEventListener('click', event => {
+          event.stopPropagation();
+          command('closeTab', tab.id);
+        });
+        item.append(close);
+      }
+      item.addEventListener('click', () => command('activateTab', tab.id));
+      return item;
+    }));
+  }
   if (lastAddress !== state.address) {
     address.value = state.address;
     pickerRevision++;
+    videoRevision++;
     picker.hidden = true;
+    videoPicker.hidden = true;
     pickerStatus.textContent = '';
+    videoStatus.textContent = '';
     choices.replaceChildren();
+    videoChoices.replaceChildren();
   }
   lastAddress = state.address;
   back.disabled = !state.back;
@@ -100,11 +212,19 @@ toolbar.onState(state => {
   reload.textContent = state.loading ? '×' : '↻';
   reload.title = state.loading ? 'Stop loading' : 'Reload';
   reload.setAttribute('aria-label', reload.title);
+  adBlockCount = state.adBlockCount ?? adBlockCount;
   const queue = state.downloads;
   const pauseMessage = queue.paused === 'verification'
     ? 'Waiting for website verification. Downloads resume when the site confirms it.'
     : queue.paused === 'rate-limit' ? 'The website asked for fewer requests. Downloads are paused.' : '';
-  status.textContent = state.notice || (state.loading ? 'Loading…' : pauseMessage);
+  status.replaceChildren();
+  status.append(state.notice || (state.loading ? 'Loading…' : pauseMessage) || '');
+  if (adBlockCount > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'adblock';
+    badge.textContent = `🛡 ${adBlockCount} blocked`;
+    status.append(badge);
+  }
   panel.hidden = !state.showingDownloads;
   document.querySelector('main').hidden = state.showingDownloads;
   downloads.setAttribute('aria-expanded', String(state.showingDownloads));

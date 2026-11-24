@@ -10,12 +10,17 @@
 </head>
 <body>
   <header>
+    <nav id="tabbar" aria-label="Open tabs">
+      <div id="tabs"></div>
+      <button id="new-tab" type="button" aria-label="New tab" title="New tab (Ctrl+T)">+</button>
+    </nav>
     <form>
       <button id="back" type="button" aria-label="Back" title="Back" disabled>←</button>
       <button id="forward" type="button" aria-label="Forward" title="Forward" disabled>→</button>
       <button id="reload" type="button" aria-label="Reload" title="Reload" disabled>↻</button>
       <input id="address" aria-label="Website address" placeholder="Enter a website address" spellcheck="false" autocomplete="off" autofocus>
       <button type="submit">Go</button>
+      <button id="download-video" type="button" title="Find videos on this page to save offline">Video</button>
       <button id="downloads" type="button" aria-expanded="false" aria-controls="download-panel">Downloads</button>
     </form>
     <p id="status" role="status"></p>
@@ -24,6 +29,20 @@
     <h1>Web Browser</h1>
     <p>Enter a website address above to get started.</p>
   </main>
+  <section id="video-panel" hidden aria-labelledby="video-heading">
+    <h1 id="video-heading">Save videos offline</h1>
+    <p class="panel-hint">Videos found on the current page. Saved files play without an internet connection.</p>
+    <button id="find-videos" type="button">Scan this page again</button>
+    <p id="video-status" role="status"></p>
+    <fieldset id="video-picker" hidden>
+      <legend>Videos found</legend>
+      <button id="select-videos" type="button">Select all</button>
+      <button id="add-videos" type="button" disabled>Add selected to downloads</button>
+      <div id="video-choices"></div>
+    </fieldset>
+    <label for="video-links">Direct video links, one per line</label>
+    <textarea id="video-links" rows="5" spellcheck="false" placeholder="https://example.com/video.mp4"></textarea>
+  </section>
   <section id="download-panel" hidden aria-labelledby="download-heading">
     <h1 id="download-heading">Bulk downloads</h1>
     <button id="find-download-links" type="button">Find links on this page</button>
