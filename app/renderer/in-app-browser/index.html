@@ -13,21 +13,65 @@
     <nav id="tabbar" aria-label="Open tabs">
       <div id="tabs"></div>
       <button id="new-tab" type="button" aria-label="New tab" title="New tab (Ctrl+T)">+</button>
+      <button id="new-private-tab" type="button" class="ghost" aria-label="New private tab" title="New private tab (Ctrl+Shift+T)">🕶</button>
     </nav>
     <form>
       <button id="back" type="button" aria-label="Back" title="Back" disabled>←</button>
       <button id="forward" type="button" aria-label="Forward" title="Forward" disabled>→</button>
       <button id="reload" type="button" aria-label="Reload" title="Reload" disabled>↻</button>
-      <input id="address" aria-label="Website address" placeholder="Enter a website address" spellcheck="false" autocomplete="off" autofocus>
+      <button id="home" type="button" aria-label="Home" title="Home">⌂</button>
+      <input id="address" aria-label="Website address or search" placeholder="Search or enter a website address" spellcheck="false" autocomplete="off" autofocus>
+      <button id="shield" type="button" class="shield" aria-label="Shields" title="Shields">🦁</button>
+      <button id="bookmark" type="button" class="ghost" aria-pressed="false" aria-label="Bookmark this page" title="Bookmark this page (Ctrl+D)">☆</button>
+      <button id="zoom-label" type="button" class="ghost zoom" title="Reset zoom (Ctrl+0)">100%</button>
+      <button id="reader" type="button" class="ghost" aria-pressed="false" aria-label="Reader mode" title="Reader mode (F9)">📖</button>
       <button type="submit">Go</button>
-      <button id="download-video" type="button" title="Find videos on this page to save offline">Video</button>
+      <button id="download-video" type="button" class="ghost" title="Find videos on this page to save offline">Video</button>
       <button id="downloads" type="button" aria-expanded="false" aria-controls="download-panel">Downloads</button>
+      <button id="menu-button" type="button" class="ghost" aria-haspopup="true" aria-expanded="false" aria-controls="menu" aria-label="Browser menu" title="Browser menu">☰</button>
     </form>
+    <div id="menu" hidden role="menu" aria-label="Browser menu">
+      <p class="menu-heading">Shields for this site</p>
+      <label class="menu-row" for="shield-level">
+        <span>Level</span>
+        <select id="shield-level">
+          <option value="strict">Strict</option>
+          <option value="standard">Standard</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <button type="button" role="menuitem" data-action="resetShieldCounters">Reset blocked counters</button>
+      <button type="button" role="menuitem" data-action="toggleShieldScripts">Toggle script blocking</button>
+      <button type="button" role="menuitem" data-action="clearSiteShield">Clear this site's overrides</button>
+      <hr>
+      <button type="button" role="menuitem" data-action="bookmark">Toggle bookmark</button>
+      <button type="button" role="menuitem" data-action="reader">Reader mode</button>
+      <button type="button" role="menuitem" data-action="zoomIn">Zoom in</button>
+      <button type="button" role="menuitem" data-action="zoomOut">Zoom out</button>
+      <button type="button" role="menuitem" data-action="zoomReset">Reset zoom</button>
+      <hr>
+      <button type="button" role="menuitem" data-action="duplicateTab">Duplicate tab</button>
+      <button type="button" role="menuitem" data-action="closeOthers">Close other tabs</button>
+      <button type="button" role="menuitem" data-action="newPrivateTab">New private tab</button>
+      <button type="button" role="menuitem" data-action="closePrivateTabs">Close private tabs</button>
+      <hr>
+      <button type="button" role="menuitem" data-action="openSettings">Browser settings…</button>
+      <button type="button" role="menuitem" data-action="clearBrowsingData">Clear browsing data…</button>
+      <hr>
+      <button type="button" role="menuitem" data-action="closeMenu">Close menu</button>
+    </div>
+    <div id="find-bar" hidden role="search" aria-label="Find in page">
+      <input id="find-input" aria-label="Find in page" placeholder="Find in page" spellcheck="false" autocomplete="off">
+      <span id="find-count" role="status" aria-live="polite"></span>
+      <button id="find-previous" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+      <button id="find-next" type="button" aria-label="Next match" title="Next match (Enter)">↓</button>
+      <button id="find-close" type="button" aria-label="Close find bar" title="Close (Esc)">×</button>
+    </div>
     <p id="status" role="status"></p>
   </header>
   <main>
     <h1>Web Browser</h1>
-    <p>Enter a website address above to get started.</p>
+    <p>Enter a website address above to get started. Shields block ads, trackers and fingerprinting by default.</p>
   </main>
   <section id="video-panel" hidden aria-labelledby="video-heading">
     <h1 id="video-heading">Save videos offline</h1>

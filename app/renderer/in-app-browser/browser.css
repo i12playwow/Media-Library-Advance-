@@ -1,5 +1,7 @@
 :root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #10151d; color: #e8eef7; }
 body { margin: 0; }
+/* The header height is mirrored by CONTENT_TOP in app/services/inAppBrowser.cjs:
+   page views are positioned below it, so nothing may overflow this box. */
 header { box-sizing: border-box; height: 104px; padding: 6px 12px 0; background: #1a2432; border-bottom: 1px solid #344256; }
 #tabbar { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
 #tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: thin; }
@@ -9,15 +11,55 @@ header { box-sizing: border-box; height: 104px; padding: 6px 12px 0; background:
 .tab .close { flex: 0 0 auto; border: none; background: transparent; color: inherit; font: inherit; min-width: 18px; height: 20px; padding: 0; border-radius: 4px; }
 .tab .close:hover { background: #42536a; }
 #new-tab { min-width: 30px; height: 28px; padding: 0 8px; font-size: 16px; }
+#new-private-tab { height: 28px; padding: 0 8px; font-size: 13px; }
 form { display: flex; gap: 6px; }
-button, input, textarea { box-sizing: border-box; height: 36px; border: 1px solid #42536a; border-radius: 6px; background: #121923; color: inherit; font: inherit; }
+button, input, textarea, select { box-sizing: border-box; height: 36px; border: 1px solid #42536a; border-radius: 6px; background: #121923; color: inherit; font: inherit; }
 button { min-width: 36px; padding: 0 10px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
 button:hover:not(:disabled) { background: #2e3d52; }
 input { flex: 1; min-width: 0; padding: 0 10px; }
 :focus-visible { outline: 2px solid #8cbeff; outline-offset: 1px; }
+
+/* ── Shields ─────────────────────────────────────────────────────────────── */
+.shield { font-size: 17px; filter: grayscale(1) opacity(.55); transition: filter .15s, background .15s; }
+.shield[aria-pressed="true"] { filter: none; background: #1d3a2a; border-color: #2f6b46; }
+.shield[data-level="strict"][aria-pressed="true"] { background: #143d33; border-color: #2b7d62; }
+.shield[data-level="off"] { filter: grayscale(1) opacity(.4); }
+/* A per-site override is drawn as a blue underline so "this site differs from
+   the global default" is visible without opening the menu. */
+.shield { position: relative; }
+.shield[data-override="true"] { box-shadow: inset 0 -2px 0 #8cbeff; }
+
+/* ── Bookmark / zoom / reader ────────────────────────────────────────────── */
+.ghost { background: transparent; border-color: transparent; }
+.ghost[aria-pressed="true"] { background: #2e3d52; border-color: #42536a; }
+#bookmark { font-size: 17px; min-width: 32px; }
+#bookmark[aria-pressed="true"] { color: #ffd166; }
+.zoom { min-width: 52px; font-size: 12px; font-variant-numeric: tabular-nums; }
+#reader[aria-pressed="true"] { color: #ffd166; }
+
+/* ── Status line ─────────────────────────────────────────────────────────── */
 #status { margin: 3px 0 0; font-size: 12px; color: #c2d4ee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #status .adblock { color: #6fae7c; margin-left: 8px; }
+
+/* ── Menu (overlay, so it never shifts the page view) ────────────────────── */
+#menu { position: absolute; top: calc(100% - 6px); right: 12px; z-index: 20; min-width: 250px; padding: 6px; border: 1px solid #42536a; border-radius: 8px; background: #18212e; box-shadow: 0 12px 32px #05080dcc; }
+#menu[hidden] { display: none; }
+#menu .menu-heading { margin: 6px 8px 4px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: #8ea6c6; }
+#menu hr { margin: 6px 4px; border: none; border-top: 1px solid #2c3a50; }
+#menu button { display: block; width: 100%; height: 30px; border: none; border-radius: 5px; background: transparent; text-align: left; font-size: 13px; }
+#menu button:hover { background: #2e3d52; }
+#menu .menu-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 8px 6px; font-size: 13px; }
+#menu select { height: 28px; font-size: 13px; }
+
+/* ── Find bar (overlay, anchored under the toolbar) ──────────────────────── */
+#find-bar { position: absolute; top: calc(100% + 4px); right: 12px; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #42536a; border-radius: 8px; background: #18212e; box-shadow: 0 12px 32px #05080dcc; }
+#find-bar[hidden] { display: none; }
+#find-bar input { width: 220px; height: 30px; flex: 0 0 auto; }
+#find-bar button { height: 30px; min-width: 30px; padding: 0 8px; }
+#find-count { min-width: 62px; font-size: 12px; color: #9fb3d1; font-variant-numeric: tabular-nums; text-align: right; }
+#find-count[data-empty="true"] { color: #e0918f; }
+
 main { text-align: center; padding: min(14vh, 100px) 20px; }
 main p { color: #b5c6de; }
 #download-panel, #video-panel { max-width: 850px; margin: 0 auto; padding: 20px; }

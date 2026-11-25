@@ -1,40 +1,76 @@
 'use strict';
+// Toolbar script for the in-app browser window.
+//
+// Everything the page needs comes from the main process as a `browser:state`
+// push and leaves again as a `browser:command` invoke, so this file holds no
+// policy of its own: it renders state and forwards intents.
 const toolbar = window.browserToolbar;
-const address = document.getElementById('address');
-const status = document.getElementById('status');
-const reload = document.getElementById('reload');
-const back = document.getElementById('back');
-const forward = document.getElementById('forward');
-const downloads = document.getElementById('downloads');
-const newTab = document.getElementById('new-tab');
-const tabsEl = document.getElementById('tabs');
-const downloadVideo = document.getElementById('download-video');
-const videoPanel = document.getElementById('video-panel');
-const findVideos = document.getElementById('find-videos');
-const videoStatus = document.getElementById('video-status');
-const videoPicker = document.getElementById('video-picker');
-const videoChoices = document.getElementById('video-choices');
-const selectVideos = document.getElementById('select-videos');
-const addVideos = document.getElementById('add-videos');
-const videoLinks = document.getElementById('video-links');
-const panel = document.getElementById('download-panel');
-const links = document.getElementById('download-links');
-const start = document.getElementById('start-downloads');
-const resume = document.getElementById('resume-downloads');
-const cancel = document.getElementById('cancel-downloads');
-const clearFinishedButton = document.getElementById('clear-finished-downloads');
-const summary = document.getElementById('download-summary');
-const list = document.getElementById('download-list');
-const findLinks = document.getElementById('find-download-links');
-const picker = document.getElementById('link-picker');
-const pickerStatus = document.getElementById('link-picker-status');
-const choices = document.getElementById('link-choices');
-const selectLinks = document.getElementById('select-download-links');
-const addLinks = document.getElementById('add-download-links');
+
+const el = id => document.getElementById(id);
+const address = el('address');
+const status = el('status');
+const reload = el('reload');
+const back = el('back');
+const forward = el('forward');
+const downloads = el('downloads');
+const newTab = el('new-tab');
+const tabsEl = el('tabs');
+const home = el('home');
+const shield = el('shield');
+const shieldLevel = el('shield-level');
+const bookmark = el('bookmark');
+const zoomLabel = el('zoom-label');
+const reader = el('reader');
+const menuButton = el('menu-button');
+const menu = el('menu');
+const findBar = el('find-bar');
+const findInput = el('find-input');
+const findCount = el('find-count');
+const findPrevious = el('find-previous');
+const findNext = el('find-next');
+const findClose = el('find-close');
+const privateTabs = el('new-private-tab');
+
+const downloadVideo = el('download-video');
+const videoPanel = el('video-panel');
+const findVideos = el('find-videos');
+const videoStatus = el('video-status');
+const videoPicker = el('video-picker');
+const videoChoices = el('video-choices');
+const selectVideos = el('select-videos');
+const addVideos = el('add-videos');
+const videoLinks = el('video-links');
+const panel = el('download-panel');
+const links = el('download-links');
+const start = el('start-downloads');
+const resume = el('resume-downloads');
+const cancel = el('cancel-downloads');
+const clearFinishedButton = el('clear-finished-downloads');
+const summary = el('download-summary');
+const list = el('download-list');
+const findLinks = el('find-download-links');
+const picker = el('link-picker');
+const pickerStatus = el('link-picker-status');
+const choices = el('link-choices');
+const selectLinks = el('select-download-links');
+const addLinks = el('add-download-links');
+
+const SHIELD_TITLES = {
+  strict: 'Shields up: strict',
+  standard: 'Shields up: standard',
+  off: 'Shields down for this site'
+};
+
 let lastAddress = '';
 let pickerRevision = 0;
 let videoRevision = 0;
 let adBlockCount = 0;
+let menuOpen = false;
+let lastState = null;
+
+const stripPrefix = message => message?.replace(/^Error invoking remote method '[^']+': Error: /, '') || '';
+
+// ── Selection helpers for the link/video pickers ─────────────────────────────
 
 function updateSelection() {
   addLinks.disabled = !choices.querySelector('input:checked');
@@ -67,7 +103,7 @@ findLinks.addEventListener('click', async () => {
     picker.hidden = !results.length;
     updateSelection();
   } catch (error) {
-    if (revision === pickerRevision) pickerStatus.textContent = error.message?.replace(/^Error invoking remote method '[^']+': Error: /, '') || 'Could not read links from this page.';
+    if (revision === pickerRevision) pickerStatus.textContent = stripPrefix(error.message) || 'Could not read links from this page.';
   }
 });
 choices.addEventListener('change', updateSelection);
@@ -88,7 +124,8 @@ addLinks.addEventListener('click', () => {
   picker.hidden = true;
 });
 
-// --- Video finder (offline saving) ---
+// ── Video finder (offline saving) ────────────────────────────────────────────
+
 downloadVideo.addEventListener('click', () => {
   const showing = !videoPanel.hidden;
   videoPanel.hidden = showing;
@@ -123,7 +160,7 @@ async function scanVideos() {
     videoPicker.hidden = !results.length;
     updateVideoSelection();
   } catch (error) {
-    if (revision === videoRevision) videoStatus.textContent = error.message?.replace(/^Error invoking remote method '[^']+': Error: /, '') || 'Could not scan this page.';
+    if (revision === videoRevision) videoStatus.textContent = stripPrefix(error.message) || 'Could not scan this page.';
   }
 }
 videoChoices.addEventListener('change', updateVideoSelection);
@@ -144,58 +181,228 @@ addVideos.addEventListener('click', () => {
   videoPicker.hidden = true;
 });
 
+// ── Command plumbing ─────────────────────────────────────────────────────────
+
+function report(error) {
+  // Errors surface on the status line unless the download panel is open,
+  // where the operator is looking at the queue summary instead.
+  const target = panel.hidden ? status : summary;
+  target.textContent = stripPrefix(error.message) || 'The browser command failed. Try again.';
+}
+
 function command(action, value) {
-  void toolbar.command(action, value).catch(error => {
-    const target = panel.hidden ? status : summary;
-    target.textContent = error.message?.replace(/^Error invoking remote method '[^']+': Error: /, '') || 'The browser command failed. Try again.';
-  });
+  return toolbar.command(action, value).catch(error => { report(error); return undefined; });
 }
 
 document.querySelector('form').addEventListener('submit', event => {
   event.preventDefault();
-  command('navigate', address.value);
-});
-for (const button of [back, forward, reload, downloads]) button.addEventListener('click', () => command(button.id));
-newTab.addEventListener('click', () => command('newTab'));
-start.addEventListener('click', () => command('startDownloads', links.value));
-resume.addEventListener('click', () => command('resumeDownloads'));
-cancel.addEventListener('click', () => command('cancelDownloads'));
-if (clearFinishedButton) clearFinishedButton.addEventListener('click', () => command('clearFinished'));
-document.addEventListener('keydown', event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't') {
-    event.preventDefault();
-    command('newTab');
-  }
+  closeMenu();
+  void command('navigate', address.value);
 });
 
-toolbar.onState(state => {
-  if (state.tabs) {
-    tabsEl.replaceChildren(...state.tabs.map(tab => {
-      const item = document.createElement('div');
-      item.className = `tab${tab.active ? ' active' : ''}`;
-      item.setAttribute('role', 'tab');
-      item.setAttribute('aria-selected', String(tab.active));
-      item.dataset.tabId = String(tab.id);
-      const title = document.createElement('span');
-      title.className = 'title';
-      title.textContent = `${tab.loading ? '⏳ ' : ''}${tab.title}`;
-      item.append(title);
-      if (tab.canClose) {
-        const close = document.createElement('button');
-        close.type = 'button';
-        close.className = 'close';
-        close.setAttribute('aria-label', `Close ${tab.title}`);
-        close.textContent = '×';
-        close.addEventListener('click', event => {
-          event.stopPropagation();
-          command('closeTab', tab.id);
-        });
-        item.append(close);
-      }
-      item.addEventListener('click', () => command('activateTab', tab.id));
-      return item;
-    }));
+for (const button of [back, forward, reload, downloads, home]) {
+  button.addEventListener('click', () => void command(button.id === 'home' ? 'home' : button.id));
+}
+newTab.addEventListener('click', () => void command('newTab'));
+if (privateTabs) privateTabs.addEventListener('click', () => void command('newPrivateTab'));
+start.addEventListener('click', () => void command('startDownloads', links.value));
+resume.addEventListener('click', () => void command('resumeDownloads'));
+cancel.addEventListener('click', () => void command('cancelDownloads'));
+if (clearFinishedButton) clearFinishedButton.addEventListener('click', () => void command('clearFinished'));
+
+// ── Shields ──────────────────────────────────────────────────────────────────
+
+shield.addEventListener('click', () => {
+  // Clicking the shield toggles shields down/up for the current site, which is
+  // the single most-used Brave gesture; the level picker lives in the menu.
+  if (!lastState) return;
+  const next = lastState.shieldsEnabled ? 'off' : (lastState.siteHasOverride ? 'standard' : 'standard');
+  void command('shieldLevel', next);
+});
+
+shieldLevel.addEventListener('change', () => {
+  void command('shieldLevel', shieldLevel.value);
+});
+
+// Keep the dropdown honest even when the level changed from elsewhere.
+function syncShieldSelect(level) {
+  for (const option of shieldLevel.options) option.selected = option.value === level;
+}
+
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+
+zoomLabel.addEventListener('click', () => void command('zoomReset'));
+
+// ── Bookmark / reader ────────────────────────────────────────────────────────
+
+bookmark.addEventListener('click', () => void command('bookmark'));
+reader.addEventListener('click', () => void command('reader'));
+
+// ── Menu ─────────────────────────────────────────────────────────────────────
+
+function openMenu() {
+  menuOpen = true;
+  menu.hidden = false;
+  menuButton.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('button, select');
+  if (first) first.focus();
+}
+
+function closeMenu() {
+  if (!menuOpen) return;
+  menuOpen = false;
+  menu.hidden = true;
+  menuButton.setAttribute('aria-expanded', 'false');
+}
+
+menuButton.addEventListener('click', event => {
+  event.stopPropagation();
+  if (menuOpen) closeMenu();
+  else openMenu();
+});
+
+menu.addEventListener('click', event => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const { action, value } = button.dataset;
+  closeMenu();
+  if (action === 'closeMenu') return;
+  void command(action, value);
+});
+
+// Any click outside the menu dismisses it.
+document.addEventListener('click', event => {
+  if (menuOpen && !menu.contains(event.target) && event.target !== menuButton && !menuButton.contains(event.target)) closeMenu();
+});
+
+// ── Find in page ─────────────────────────────────────────────────────────────
+
+function showFind(select) {
+  // Find is an overlay on top of the page view, so it also opens the query
+  // from state; select() is only used when the operator asked for it.
+  findBar.hidden = false;
+  if (select) findInput.select();
+  else findInput.focus();
+}
+
+function hideFind() {
+  findBar.hidden = true;
+  findInput.value = '';
+  findCount.textContent = '';
+  void command('closeFind');
+}
+
+findInput.addEventListener('input', () => {
+  const query = findInput.value;
+  if (!query) { findCount.textContent = ''; void command('closeFind'); return; }
+  void command('find', query);
+});
+findInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    void command(event.shiftKey ? 'findPrevious' : 'findNext');
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    hideFind();
   }
+});
+findNext.addEventListener('click', () => void command('findNext'));
+findPrevious.addEventListener('click', () => void command('findPrevious'));
+findClose.addEventListener('click', () => hideFind());
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', event => {
+  const mod = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (key === 'escape' && menuOpen) { closeMenu(); return; }
+  if (key === 'escape' && !findBar.hidden) { hideFind(); return; }
+  if (!mod) {
+    // F9 toggles reader mode, matching the menu accelerator.
+    if (event.key === 'F9') { event.preventDefault(); void command('reader'); }
+    return;
+  }
+  if (key === 't') { event.preventDefault(); void command(event.shiftKey ? 'newPrivateTab' : 'newTab'); }
+  else if (key === 'w') { event.preventDefault(); void command('closeTab'); }
+  else if (key === 'l') { event.preventDefault(); address.focus(); address.select(); }
+  else if (key === 'f') { event.preventDefault(); showFind(true); }
+  else if (key === 'd') { event.preventDefault(); void command('bookmark'); }
+  else if (key === 'r') { event.preventDefault(); void command('reload'); }
+  else if (key === '=' || key === '+') { event.preventDefault(); void command('zoomIn'); }
+  else if (key === '-') { event.preventDefault(); void command('zoomOut'); }
+  else if (key === '0') { event.preventDefault(); void command('zoomReset'); }
+});
+
+// ── State rendering ──────────────────────────────────────────────────────────
+
+function tabElement(tab) {
+  const item = document.createElement('div');
+  item.className = `tab${tab.active ? ' active' : ''}`;
+  item.setAttribute('role', 'tab');
+  item.setAttribute('aria-selected', String(tab.active));
+  item.dataset.tabId = String(tab.id);
+  item.title = tab.address || tab.title;
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = `${tab.loading ? '⏳ ' : ''}${tab.muted ? '🔇 ' : ''}${tab.title}`;
+  item.append(title);
+  if (tab.canClose) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'close';
+    close.setAttribute('aria-label', `Close ${tab.title}`);
+    close.textContent = '×';
+    close.addEventListener('click', event => {
+      event.stopPropagation();
+      void command('closeTab', tab.id);
+    });
+    item.append(close);
+  }
+  item.addEventListener('click', () => void command('activateTab', tab.id));
+  item.addEventListener('auxclick', event => {
+    if (event.button === 1 && tab.canClose) { event.preventDefault(); void command('closeTab', tab.id); }
+  });
+  return item;
+}
+
+function renderStatus(state) {
+  const queue = state.downloads;
+  const pauseMessage = queue.paused === 'verification'
+    ? 'Waiting for website verification. Downloads resume when the site confirms it.'
+    : queue.paused === 'rate-limit' ? 'The website asked for fewer requests. Downloads are paused.' : '';
+  status.replaceChildren();
+  status.append(state.notice || (state.loading ? 'Loading…' : pauseMessage) || '');
+  if (adBlockCount > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'adblock';
+    badge.textContent = `🛡 ${adBlockCount} blocked`;
+    badge.title = `${state.shieldCounts.ad} ads · ${state.shieldCounts.tracker} trackers · ${state.shieldCounts.fingerprint} fingerprinting · ${state.shieldCounts.script} scripts`;
+    status.append(badge);
+  }
+  if (state.readerOpen) {
+    const badge = document.createElement('span');
+    badge.className = 'adblock';
+    badge.textContent = 'Reader mode';
+    status.append(badge);
+  }
+}
+
+function renderFind(state) {
+  const active = Boolean(state.findQuery);
+  findBar.hidden = !active;
+  if (document.activeElement !== findInput) findInput.value = state.findQuery || '';
+  if (!active) { findCount.textContent = ''; return; }
+  const result = state.findResult;
+  if (!result) { findCount.textContent = '…'; return; }
+  findCount.textContent = result.matches ? `${result.activeMatch} / ${result.matches}` : 'No matches';
+  findCount.dataset.empty = String(!result.matches);
+}
+
+toolbar.onState(state => {
+  lastState = state;
+
+  if (state.tabs) tabsEl.replaceChildren(...state.tabs.map(tabElement));
+
   if (lastAddress !== state.address) {
     address.value = state.address;
     pickerRevision++;
@@ -208,40 +415,54 @@ toolbar.onState(state => {
     videoChoices.replaceChildren();
   }
   lastAddress = state.address;
+
   back.disabled = !state.back;
   forward.disabled = !state.forward;
   reload.disabled = !state.address;
   reload.textContent = state.loading ? '×' : '↻';
   reload.title = state.loading ? 'Stop loading' : 'Reload';
   reload.setAttribute('aria-label', reload.title);
+  home.disabled = false;
+
+  // Shields: a pressed shield means protection is on for this page.
+  const level = state.shieldLevel || 'standard';
+  shield.dataset.level = level;
+  shield.setAttribute('aria-pressed', String(Boolean(state.shieldsEnabled)));
+  shield.title = `${SHIELD_TITLES[level] || SHIELD_TITLES.standard}${state.siteHost ? ` · ${state.siteHost}` : ''}\nClick to turn shields ${state.shieldsEnabled ? 'off' : 'on'}${state.siteHasOverride ? ' (site override)' : ''}`;
+  shield.dataset.override = String(Boolean(state.siteHasOverride));
+  syncShieldSelect(level);
+
+  bookmark.setAttribute('aria-pressed', String(Boolean(state.bookmarked)));
+  bookmark.textContent = state.bookmarked ? '★' : '☆';
+  bookmark.title = state.bookmarked ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+  bookmark.disabled = !state.address;
+
+  zoomLabel.textContent = `${state.zoom ?? 100}%`;
+  reader.setAttribute('aria-pressed', String(Boolean(state.readerOpen)));
+  reader.disabled = !state.address;
+
   adBlockCount = state.adBlockCount ?? adBlockCount;
-  const queue = state.downloads;
-  const pauseMessage = queue.paused === 'verification'
-    ? 'Waiting for website verification. Downloads resume when the site confirms it.'
-    : queue.paused === 'rate-limit' ? 'The website asked for fewer requests. Downloads are paused.' : '';
-  status.replaceChildren();
-  status.append(state.notice || (state.loading ? 'Loading…' : pauseMessage) || '');
-  if (adBlockCount > 0) {
-    const badge = document.createElement('span');
-    badge.className = 'adblock';
-    badge.textContent = `🛡 ${adBlockCount} blocked`;
-    status.append(badge);
-  }
+  renderStatus(state);
+  renderFind(state);
+
   panel.hidden = !state.showingDownloads;
   document.querySelector('main').hidden = state.showingDownloads;
   downloads.setAttribute('aria-expanded', String(state.showingDownloads));
+
+  const queue = state.downloads;
   start.disabled = queue.running || queue.paused;
   resume.hidden = !queue.paused;
   resume.textContent = queue.paused === 'verification' ? 'Resume after verification' : 'Resume downloads';
   cancel.disabled = !queue.running && !queue.paused;
   if (panel.hidden) return;
-  // --- Download manager panel ---
+
+  // ── Download manager panel ────────────────────────────────────────────────
   const stats = queue.summary ?? {};
-  const totalText = stats.total
-    ? `${formatBytes(stats.received)} / ${formatBytes(stats.total)}`
-    : formatBytes(stats.received);
+  const totalText = stats.total ? `${formatBytes(stats.received)} / ${formatBytes(stats.total)}` : formatBytes(stats.received);
   const speedText = stats.speed ? ` · ${formatBytes(stats.speed)}/s` : '';
-  summary.textContent = pauseMessage
+  summary.textContent = (queue.paused === 'verification'
+    ? 'Waiting for website verification. Downloads resume when the site confirms it.'
+    : queue.paused === 'rate-limit' ? 'The website asked for fewer requests. Downloads are paused.' : '')
     || (queue.folder
       ? `${stats.completed ?? 0} completed · ${stats.active ?? 0} active · ${stats.failed ?? 0} failed · ${totalText}${speedText}`
       : '');
@@ -291,7 +512,7 @@ function managerRow(entry) {
     button.title = title;
     button.setAttribute('aria-label', `${title}: ${entry.name || entry.url}`);
     button.disabled = !enabled;
-    button.addEventListener('click', () => command(action, entry.id));
+    button.addEventListener('click', () => void command(action, entry.id));
     return button;
   };
   if (entry.status === 'downloading' || entry.status === 'queued') {
@@ -312,5 +533,6 @@ function managerRow(entry) {
   return row;
 }
 
-toolbar.onFocusAddress(() => { address.focus(); address.select(); });
-command('ready');
+toolbar.onFocusAddress(() => { closeMenu(); address.focus(); address.select(); });
+toolbar.onFocusFind(() => showFind(true));
+void command('ready');

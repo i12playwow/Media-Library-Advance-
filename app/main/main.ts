@@ -1014,7 +1014,7 @@ async function backfillMoviePosters(
 // site's markup.
 
 function registerHandlers(): void {
-  const browser = require("../services/inAppBrowser.cjs").createInAppBrowser({ app, BrowserWindow, WebContentsView, ipcMain, session });
+  const browser = require("../services/inAppBrowser.cjs").createInAppBrowser({ app, BrowserWindow, WebContentsView, ipcMain, session, shell });
   ipcMain.handle("app:openBrowser", (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("Open the browser from the main app window.");
     browser.open();
