@@ -27,7 +27,6 @@ input { flex: 1; min-width: 0; padding: 0 10px; }
 .shield[data-level="off"] { filter: grayscale(1) opacity(.4); }
 /* A per-site override is drawn as a blue underline so "this site differs from
    the global default" is visible without opening the menu. */
-.shield { position: relative; }
 .shield[data-override="true"] { box-shadow: inset 0 -2px 0 #8cbeff; }
 
 /* ── Bookmark / zoom / reader ────────────────────────────────────────────── */
