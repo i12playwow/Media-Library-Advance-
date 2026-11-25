@@ -265,7 +265,7 @@ export function useLibrary({
         setSelectedMovieId(nextMovies[0].id);
       }
       if (!append && nextMovies.length === 0 && !isScanningRef.current && viewMode === "all") {
-        const libraryPages = new Set(["library", "search"]);
+        const libraryPages = new Set(["library", "search", "generation"]);
         setActivePage((current) =>
           libraryPages.has(current) ? "home" : current
         );

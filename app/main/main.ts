@@ -46,6 +46,8 @@ import type {
   MediaProcessingJob,
   MediaProcessingQueueState,
   MediaProcessingJobKind,
+  MediaJobEnqueueResult,
+  SubtitleQueueOptions,
   MovieLabelMode,
   RelinkMissingResult
 } from "../shared/contracts";
@@ -1713,6 +1715,32 @@ const linkActressMovies = require("../services/actressMovies.cjs").createActress
   ipcMain.handle("processing:getState", (): MediaProcessingQueueState => mediaProcessingQueue.state());
   ipcMain.handle("processing:enqueueMovie", (_event, movieId: string): MediaProcessingQueueState => {
     mediaProcessingQueue.enqueueAutomatic(movieId);
+    return mediaProcessingQueue.state();
+  });
+
+  // Generation Center entry points. Subtitle jobs carry the operator's
+  // settings so the queue runs exactly what was picked on the form.
+  ipcMain.handle("processing:enqueueSubtitle", (_event, movieId: string, settings: SubtitleQueueOptions): MediaJobEnqueueResult => {
+    if (!database.getMovie(movieId)) {
+      return { queue: mediaProcessingQueue.state(), jobId: null };
+    }
+    const jobId = mediaProcessingQueue.enqueue(movieId, "generate-subtitle", settings);
+    return { queue: mediaProcessingQueue.state(), jobId };
+  });
+  ipcMain.handle("processing:cancelJob", (_event, jobId: string): MediaProcessingQueueState => {
+    mediaProcessingQueue.cancel(jobId);
+    return mediaProcessingQueue.state();
+  });
+  ipcMain.handle("processing:retryJob", (_event, jobId: string): MediaProcessingQueueState => {
+    mediaProcessingQueue.retry(jobId);
+    return mediaProcessingQueue.state();
+  });
+  ipcMain.handle("processing:removeJob", (_event, jobId: string): MediaProcessingQueueState => {
+    mediaProcessingQueue.remove(jobId);
+    return mediaProcessingQueue.state();
+  });
+  ipcMain.handle("processing:clearFinished", (): MediaProcessingQueueState => {
+    mediaProcessingQueue.clearFinished();
     return mediaProcessingQueue.state();
   });
 

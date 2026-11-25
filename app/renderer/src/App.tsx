@@ -19,6 +19,7 @@ import { ActressesPage } from "./components/ActressesPage";
 import { ContextMenu } from "./components/ContextMenu";
 import { DisplayNameDialog } from "./components/DisplayNameDialog";
 import { ActressContextMenu } from "./components/ActressContextMenu";
+import { GenerationCenter } from "./components/GenerationCenter";
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
 import { SearchPage } from "./components/SearchPage";
@@ -51,6 +52,7 @@ const pages: { id: AppPage; label: string }[] = [
   { id: "home", label: "Home" },
   { id: "library", label: "Library" },
   { id: "search", label: "Sub-Gen" },
+  { id: "generation", label: "Generation Center" },
   { id: "actresses", label: "Actresses" },
   { id: "player", label: "▶ Player" },
   { id: "settings", label: "Settings" }
@@ -736,6 +738,17 @@ export function App() {
             movies={movies}
             setSelectedMovieId={setSelectedMovieId}
             setActivePage={setActivePage}
+            onSubtitleGenerated={() => refreshMovies()}
+          />
+        )}
+
+        {activePage === "generation" && (
+          <GenerationCenter
+            gentleUnlocked={appState?.gentleUnlocked ?? false}
+            movies={movies}
+            processingQueue={processingQueue}
+            setSelectedMovieId={setSelectedMovieId}
+            setActivePage={(page) => setActivePage(page)}
             onSubtitleGenerated={() => refreshMovies()}
           />
         )}

@@ -24,7 +24,9 @@ import type {
   SubtitleGenerationPreview,
   SubtitleGenerationResult,
   SubtitleScanResult,
-  MediaProcessingQueueState
+  MediaProcessingQueueState,
+  MediaJobEnqueueResult,
+  SubtitleQueueOptions
 } from "../../shared/contracts";
 
 declare global {
@@ -116,6 +118,11 @@ declare global {
       previewSubtitleOutput: (movieId: string, options: SubtitleGenerationOptions) => Promise<SubtitleGenerationPreview>;
       processingGetState: () => Promise<MediaProcessingQueueState>;
       processingEnqueueMovie: (movieId: string) => Promise<MediaProcessingQueueState>;
+      processingEnqueueSubtitle: (movieId: string, settings: SubtitleQueueOptions) => Promise<MediaJobEnqueueResult>;
+      processingCancelJob: (jobId: string) => Promise<MediaProcessingQueueState>;
+      processingRetryJob: (jobId: string) => Promise<MediaProcessingQueueState>;
+      processingRemoveJob: (jobId: string) => Promise<MediaProcessingQueueState>;
+      processingClearFinished: () => Promise<MediaProcessingQueueState>;
       onProcessingChanged: (handler: (state: MediaProcessingQueueState) => void) => () => void;
     };
   }

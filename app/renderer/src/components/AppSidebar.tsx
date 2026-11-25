@@ -70,7 +70,7 @@ export const AppSidebar = memo(function AppSidebar({
 
           <nav className="nav">
             {pages.map((page) => {
-              const requiresLibrary = page.id === "library" || page.id === "search";
+              const requiresLibrary = page.id === "library" || page.id === "search" || page.id === "generation";
               const isDisabled = requiresLibrary && movies.length === 0 && (libraryTotals?.available ?? libraryTotals?.cataloged ?? 0) === 0;
               return (
                 <button

@@ -915,6 +915,14 @@ export class DatabaseClient {
     }
   }
 
+  /** Clears queued and failed rows so the Generation Center starts clean. */
+  clearFinishedMediaProcessingJobs(): number {
+    const result = this.db
+      .prepare("DELETE FROM media_processing_jobs WHERE status IN ('failed', 'cancelled')")
+      .run();
+    return result.changes;
+  }
+
   setSubtitleDirs(dirs: string[]): void {
     this.setSetting("subtitle_dirs", JSON.stringify(Array.from(new Set(dirs))));
   }
@@ -941,7 +949,9 @@ export class DatabaseClient {
     }>;
   }
 
-  enqueueMediaProcessingJob(movieId: string, kind: string): string | null {
+  /** `message` rides on the queued row so a job carries its own settings
+   *  (e.g. "Queued · medium · Japanese") before it ever starts running. */
+  enqueueMediaProcessingJob(movieId: string, kind: string, message = "Waiting to start"): string | null {
     const existing = this.db.prepare(`
       SELECT id FROM media_processing_jobs
       WHERE movie_id = ? AND kind = ? AND status IN ('queued', 'running', 'completed')
@@ -953,7 +963,7 @@ export class DatabaseClient {
     this.db.prepare(`
       INSERT INTO media_processing_jobs (id, movie_id, kind, status, progress, message, error, created_at, updated_at)
       VALUES (?, ?, ?, 'queued', 0, ?, NULL, ?, ?)
-    `).run(id, movieId, kind, "Waiting to start", now, now);
+    `).run(id, movieId, kind, message, now, now);
     return id;
   }
 
@@ -963,6 +973,10 @@ export class DatabaseClient {
     const next = { ...current, ...update };
     this.db.prepare(`UPDATE media_processing_jobs SET status = ?, progress = ?, message = ?, error = ?, updated_at = ? WHERE id = ?`)
       .run(next.status, next.progress, next.message, next.error, new Date().toISOString(), id);
+  }
+
+  deleteMediaProcessingJob(id: string): void {
+    this.db.prepare("DELETE FROM media_processing_jobs WHERE id = ? AND status NOT IN ('queued', 'running')").run(id);
   }
 
   /** Requeue jobs orphaned in 'running' by a previous session: nothing is

@@ -144,8 +144,8 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
       // Number keys 1–6 → switch pages
       if (!e.ctrlKey && !e.altKey && !e.shiftKey) {
         const pageMap: Record<string, AppPage> = {
-          "1": "home", "2": "library", "3": "search",
-          "4": "actresses", "5": "player", "6": "settings",
+          "1": "home", "2": "library", "3": "search", "4": "generation",
+          "5": "actresses", "6": "player", "7": "settings",
         };
         if (pageMap[e.key]) {
           setActivePage?.(pageMap[e.key]);

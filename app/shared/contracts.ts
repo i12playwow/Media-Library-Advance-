@@ -5,6 +5,7 @@ export type AppPage =
   | "home"
   | "library"
   | "search"
+  | "generation"
   | "actresses"
   | "player"
   | "settings";
@@ -180,6 +181,23 @@ export interface MediaProcessingJob {
 export interface MediaProcessingQueueState {
   jobs: MediaProcessingJob[];
   running: boolean;
+}
+
+/** What a subtitle job should do when the queue reaches it. The Sub-Gen page
+ *  sends this so the Generation Center runs the exact settings the operator
+ *  picked (language, model, output destination) instead of the defaults. */
+export interface SubtitleQueueOptions {
+  language: SubtitleGenerationLanguage;
+  model: SubtitleGenerationModel;
+  outputMode: SubtitleGenerationOutputMode;
+  outputDirectory?: string | null;
+  outputFileName?: string | null;
+}
+
+export interface MediaJobEnqueueResult {
+  queue: MediaProcessingQueueState;
+  /** Newly created job id — null when an identical job was already pending. */
+  jobId: string | null;
 }
 
 export type MovieLabelMode = "display-name" | "title" | "filename";

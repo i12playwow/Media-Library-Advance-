@@ -41,11 +41,11 @@ this table):
 | `actress:*` | actress photos, regions, and metadata | `actress:getPhotos`, `actress:linkMovies`, `actress:rescanMetadata`, `actress:getRegions`, `actress:getRegion`, `actress:refreshPhotos`, `actress:removePhoto`, `actress:listPhotos`, `actress:setPrimaryPhoto`, `actress:setRegion`, `actress:setPhoto` |
 | `player:*` | playback | `player:openWindow`, `player:getWindowMovie`, `player:windowMovie` (push), `player:fetchSubtitles`, `player:downloadSubtitle`, `player:installSubtitle`, `player:getSettings`, `player:saveSettings`, `player:getPlaybackCheckpoint`, `player:savePlaybackCheckpoint`, `player:clearPlaybackCheckpoint`, `player:getFileUrl`, `player:convertToMp4`, `player:setFrameless`, `player:windowAction` |
 | `subtitle:*` | subtitle generation and local subtitle directories | `subtitle:addDir`, `subtitle:removeDir`, `subtitle:scan`, `subtitle:generateForMovie`, `subtitle:getModelAvailability`, `subtitle:downloadModel`, `subtitle:previewOutput`, `subtitle:modelDownloadProgress` (push) |
-| `processing:*` | automatic MP4 conversion and subtitle-generation queue | `processing:getState`, `processing:enqueueMovie`, `processing:changed` (push) |
+| `processing:*` | automatic MP4 conversion and subtitle-generation queue (Generation Center) | `processing:getState`, `processing:enqueueMovie`, `processing:enqueueSubtitle`, `processing:cancelJob`, `processing:retryJob`, `processing:removeJob`, `processing:clearFinished`, `processing:changed` (push) |
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
 | `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-14 prefixes, 80 invoke channels (one `ipcMain.handle` each, all in main.ts),
+14 prefixes, 85 invoke channels (one `ipcMain.handle` each, all in main.ts),
 5 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
 `onSubtitleModelDownloadProgress`, `onProcessingChanged`, and
@@ -53,7 +53,7 @@ this table):
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 80 invoke channels has a
+- **Every named channel is real.** Each of the 85 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`

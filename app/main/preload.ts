@@ -24,7 +24,9 @@ import type {
   SubtitleGenerationPreview,
   SubtitleGenerationResult,
   SubtitleScanResult,
-  MediaProcessingQueueState
+  MediaProcessingQueueState,
+  MediaJobEnqueueResult,
+  SubtitleQueueOptions
 } from "../shared/contracts";
 
 let libraryViewMode: "all" | "normal" | "gentle"=new URLSearchParams(window.location.search).has('playerWindow')?'all':'normal';
@@ -206,6 +208,12 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     ipcRenderer.invoke("subtitle:previewOutput", movieId, options),
   processingGetState: (): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:getState"),
   processingEnqueueMovie: (movieId: string): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:enqueueMovie", movieId),
+  processingEnqueueSubtitle: (movieId: string, settings: SubtitleQueueOptions): Promise<MediaJobEnqueueResult> =>
+    ipcRenderer.invoke("processing:enqueueSubtitle", movieId, settings),
+  processingCancelJob: (jobId: string): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:cancelJob", jobId),
+  processingRetryJob: (jobId: string): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:retryJob", jobId),
+  processingRemoveJob: (jobId: string): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:removeJob", jobId),
+  processingClearFinished: (): Promise<MediaProcessingQueueState> => ipcRenderer.invoke("processing:clearFinished"),
   onProcessingChanged: (handler: (state: MediaProcessingQueueState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: MediaProcessingQueueState) => handler(state);
     ipcRenderer.on("processing:changed", listener);
