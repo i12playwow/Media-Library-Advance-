@@ -29,16 +29,21 @@ test("Electron app smoke flow covers library, gentle toggle, player, and theme p
     await expect(page.getByText("Gentle off · Ctrl+Alt+D")).toBeVisible();
     await toggleGentle(page);
     await expect(page.getByText("Gentle on · Ctrl+Alt+D")).toBeVisible();
+    // Unlocking alone is not enough: the library shows one mode at a time
+    // (Normal/Gentle switch), so the Gentle view must be selected explicitly.
+    await page.getByRole("button", { name: "Gentle library" }).click();
     await expect(page.locator(".movie-tile").filter({ hasText: "Gentle Feature" }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Normal library" }).click();
+    await expect(page.locator(".movie-tile").filter({ hasText: "Zeta Feature" }).first()).toBeVisible();
 
     await page.locator(".movie-tile").filter({ hasText: "Zeta Feature" }).first().click({ button: "right" });
     await page.getByRole("button", { name: "Open in built-in player" }).click();
-    // Opening from the context menu pops the player up in a floating window
-    // (the library stays mounted behind it), so the title is asserted on the
-    // popup header rather than as unique page text.
-    await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
-    await page.getByRole("button", { name: "Subtitles", exact: true }).click();
-    await expect(page.locator("#player-sub-search-query")).toHaveValue("ZZZ-001");
+    // Opening from the context menu launches the detached player window; the
+    // movie title is asserted on that window's now-playing header.
+    const playerWindow = await app.waitForEvent("window");
+    await expect(playerWindow.locator(".player-pick-title")).toHaveText("Zeta Feature");
+    await playerWindow.getByRole("button", { name: "Subtitles", exact: true }).click();
+    await expect(playerWindow.locator("#player-sub-search-query")).toHaveValue("ZZZ-001");
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     const themeToggle = page.getByLabel("Use light theme");

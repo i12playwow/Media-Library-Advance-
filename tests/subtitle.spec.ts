@@ -33,13 +33,14 @@ test("Subtitle search is auto-filled with the detected DVD ID and stays editable
 
     await tile.click({ button: "right" });
     await page.getByRole("button", { name: "Open in built-in player" }).click();
-    // The player opens in a floating popup over the still-mounted library, so
-    // the movie title appears in (and is asserted on) the popup header.
-    await expect(page.locator(".player-popup-title")).toHaveText("Zeta Feature");
+    // The player opens in its own detached window; the movie title appears in
+    // (and is asserted on) that window's now-playing header.
+    const playerWindow = await app.waitForEvent("window");
+    await expect(playerWindow.locator(".player-pick-title")).toHaveText("Zeta Feature");
 
-    await page.getByRole("button", { name: "Subtitles", exact: true }).click();
+    await playerWindow.getByRole("button", { name: "Subtitles", exact: true }).click();
 
-    const searchInput = page.locator("#player-sub-search-query");
+    const searchInput = playerWindow.locator("#player-sub-search-query");
     await expect(searchInput).toHaveValue("ZZZ-001");
 
     // The query stays editable — the merge made the search box a controlled input.
@@ -47,7 +48,7 @@ test("Subtitle search is auto-filled with the detected DVD ID and stays editable
     await expect(searchInput).toHaveValue("ZZZ-999");
 
     // The local .srt seeded for this movie is offered in the panel.
-    await expect(page.locator(".player-sub-item").filter({ hasText: "en" }).first()).toBeVisible();
+    await expect(playerWindow.locator(".player-sub-item").filter({ hasText: "en" }).first()).toBeVisible();
   } finally {
     await app.close();
     profile.database.close();
