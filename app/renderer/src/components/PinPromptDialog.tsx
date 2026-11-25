@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type React from "react";
 
 interface PinPromptDialogProps {
@@ -8,15 +9,40 @@ interface PinPromptDialogProps {
 }
 
 export function PinPromptDialog({ pinInput, onPinChange, onUnlock, onClose }: PinPromptDialogProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the PIN field on open so the shortcut flow (Ctrl+Shift+P) is
+  // type-the-code immediately; Escape cancels like the other dialogs.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Escape") {
+      onClose();
+      return;
+    }
+    if (event.key === "Enter" && pinInput.length === 4) {
+      onUnlock();
+    }
+  };
+
   return (
     <div className="modal-backdrop">
-      <div className="modal-card">
+      <div
+        aria-label="Enter Gentle mode PIN"
+        aria-modal="true"
+        className="modal-card"
+        role="dialog"
+      >
         <input
           className="search-input"
           inputMode="numeric"
           maxLength={4}
           onChange={(event) => onPinChange(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Enter PIN"
+          ref={inputRef}
           type="password"
           value={pinInput}
         />

@@ -24,7 +24,6 @@ import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
 import { SearchPage } from "./components/SearchPage";
 import { DuplicateResolutionModal } from "./components/DuplicateResolutionModal";
-import { MovieTile } from "./components/MovieTile";
 import { PlayerPopup } from "./components/PlayerPopup";
 import { PlayerPage } from "./components/PlayerPage";
 import { PinPromptDialog } from "./components/PinPromptDialog";
@@ -520,6 +519,7 @@ export function App() {
     navigatePlaylist,
     handleScanSaved: () => void handleScanSaved(),
     openScanOptions,
+    setShowPinPrompt,
   });
 
   // Gentle state arrives over the gentle:unlockResult push channel (see
@@ -967,14 +967,6 @@ export function App() {
         <ActressContextMenu
           menu={actressContextMenu}
           onClose={() => setActressContextMenu(null)}
-          onAddPhoto={async () => {
-            if (!desktopApi) return;
-            const updated = await desktopApi.actressSetPhoto(actressContextMenu.name);
-            setActressPhotos(updated);
-            const photos = await desktopApi.actressListPhotos(actressContextMenu.name);
-            setSelectedActressPhotos(photos);
-            setActressContextMenu(null);
-          }}
           onSetPhoto={async () => {
             if (!desktopApi) return;
             const updated = await desktopApi.actressSetPhoto(actressContextMenu.name);

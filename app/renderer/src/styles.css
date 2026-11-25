@@ -1152,6 +1152,34 @@ code {
   flex-shrink: 0;
 }
 
+/* Grouped library toolbar: related actions sit together on one row so the
+   wrapped layout reads as sections instead of a wall of identical buttons. */
+.toolbar-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-right: 0.75rem;
+  margin-right: 0.25rem;
+  border-right: 1px solid var(--line);
+}
+
+.toolbar-group:last-child {
+  border-right: none;
+  padding-right: 0;
+  margin-right: 0;
+}
+
+/* Destructive actions get a distinct tint so they don't read like browsing
+   controls. Uses text-color emphasis rather than filled buttons to stay calm. */
+.ghost-button.danger {
+  color: var(--danger, #ff6b6b);
+}
+
+.ghost-button.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.12);
+}
+
 .search-result {
   padding: 1rem 1.1rem;
   background: rgba(255, 255, 255, 0.03);

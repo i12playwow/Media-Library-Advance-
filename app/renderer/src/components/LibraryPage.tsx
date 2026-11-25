@@ -3,19 +3,9 @@ import { LibraryCounts } from "./LibraryCounts";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { LibraryMode, MovieLabelField, MovieRecord } from "../../../shared/contracts";
+import { SORT_LABELS, type SortMode } from "../../../shared/librarySort";
 import { distinctPosterMovies } from "../distinctPosterMovies";
 import { MovieTile } from "./MovieTile";
-
-type SortMode =
-  | "actress"
-  | "import-date"
-  | "dvd-id"
-  | "studio"
-  | "tag"
-  | "actress-age"
-  | "recent-add"
-  | "oldest"
-  | "newest";
 
 interface LibraryPageProps {
   movies: MovieRecord[];
@@ -134,103 +124,112 @@ export function LibraryPage({
               )}
             </h3>
           </div>
-          <LibraryModeSwitch gentleUnlocked={gentleUnlocked}/><div className="inline-actions">
-            <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
-            {onRemoveMovies && <><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Delete selected ({selectedIdSet.size})…</button><button className="ghost-button" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "delete-permanently")} title="Permanently delete the selected video files. This cannot be undone.">Delete selected permanently…</button></>}
+          <LibraryModeSwitch gentleUnlocked={gentleUnlocked}/>
+          <div className="inline-actions">
+            <div className="toolbar-group" role="group" aria-label="View options">
+              <button className="ghost-button" type="button" aria-pressed={groupCopies} onClick={() => setGroupCopies(value => !value)}>{groupCopies ? "Show duplicate copies" : "Hide duplicate copies"}</button>
+              <div className="columns-control">
+                <span>Sort</span>
+                <select
+                  className="filter-select"
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as SortMode)}
+                >
+                  {Object.entries(SORT_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="zoom-control">
+                <button
+                  className="zoom-btn"
+                  disabled={gridColumns <= 3}
+                  onClick={() => changeGridColumns(gridColumns - 1)}
+                  title="Zoom in"
+                  type="button"
+                >
+                  +
+                </button>
+                <span className="zoom-pct">{Math.round(300 / gridColumns)}%</span>
+                <button
+                  className="zoom-btn"
+                  disabled={gridColumns >= 8}
+                  onClick={() => changeGridColumns(gridColumns + 1)}
+                  title="Zoom out"
+                  type="button"
+                >
+                  −
+                </button>
+              </div>
+            </div>
+            {onRemoveMovies && (
+              <div className="toolbar-group" role="group" aria-label="Remove selected">
+                <button className="ghost-button danger" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "library")}>Remove selected from library…</button>
+                <button className="ghost-button danger" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "trash")}>Delete selected ({selectedIdSet.size})…</button>
+                <button className="ghost-button danger" type="button" disabled={isScanning || selectedIdSet.size === 0} onClick={() => void onRemoveMovies([...selectedIdSet], "delete-permanently")} title="Permanently delete the selected video files. This cannot be undone.">Delete selected permanently…</button>
+              </div>
+            )}
             {onRemoveNoPosterNonAv && <button className="ghost-button" type="button" disabled={isScanning} onClick={() => void onRemoveNoPosterNonAv()} title="Remove library entries that have no poster and no JAV-style ID. Files on disk are kept.">Remove non-AV without posters…</button>}
-            <div className="columns-control">
-              <span>Sort</span>
-              <select
-                className="filter-select"
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-              >
-                <option value="actress">1. Actress A–Z</option>
-                <option value="studio">2. Studio</option>
-                <option value="tag">3. Tag</option>
-                <option value="import-date">4. Import Date</option>
-                <option value="dvd-id">5. DVD ID</option>
-                <option value="actress-age">6. Actress Age</option>
-                <option value="recent-add">7. Recent Add</option>
-                <option value="oldest">8. Oldest</option>
-                <option value="newest">9. Newest</option>
-              </select>
-            </div>
-            <div className="zoom-control">
+            <div className="toolbar-group" role="group" aria-label="Scan library">
               <button
-                className="zoom-btn"
-                disabled={gridColumns <= 3}
-                onClick={() => changeGridColumns(gridColumns - 1)}
-                title="Zoom in"
+                className="secondary-button"
+                disabled={isScanning}
+                onClick={() => openScanOptions("normal")}
                 type="button"
               >
-                +
+                <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Scan normal media folder
               </button>
-              <span className="zoom-pct">{Math.round(300 / gridColumns)}%</span>
               <button
-                className="zoom-btn"
-                disabled={gridColumns >= 8}
-                onClick={() => changeGridColumns(gridColumns + 1)}
-                title="Zoom out"
+                className="secondary-button"
+                disabled={isScanning}
+                onClick={() => openScanOptions("gentle")}
                 type="button"
               >
-                −
+                <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Scan gentle media folder
               </button>
             </div>
-            <button
-              className="secondary-button"
-              disabled={isScanning}
-              onClick={() => openScanOptions("normal")}
-              type="button"
-            >
-              <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Scan normal media folder
-            </button>
-            <button
-              className="secondary-button"
-              disabled={isScanning}
-              onClick={() => openScanOptions("gentle")}
-              type="button"
-            >
-              <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Scan gentle media folder
-            </button>
-            <button className="ghost-button" disabled={isScanning} type="button" onClick={() => void selectAllMode("normal")}>
-              <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Select all Normal
-            </button>
-            <button className="ghost-button" disabled={isScanning || !gentleUnlocked} title={gentleUnlocked ? "Select every Gentle video, including unloaded pages" : "Unlock Gentle mode to select its videos"} type="button" onClick={() => void selectAllMode("gentle")}>
-              <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Select all Gentle
-            </button>
-            <button
-              className="ghost-button"
-              disabled={isScanning}
-              onClick={selectMissingPosterTitles}
-              type="button"
-            >
-              Select missing posters
-            </button>
-            <button
-              className="ghost-button"
-              disabled={isScanning || selectedIdSet.size === 0}
-              onClick={() => void handleRefreshSelectedPosters()}
-              type="button"
-            >
-              Regenerate selected posters
-            </button>
-            <button
-              className="ghost-button"
-              disabled={isScanning || selectedIdSet.size === 0}
-              onClick={() => void handleBatchMove("normal")}
-              type="button"
-            >
-              Move selected to Normal…
-            </button>
-            <button
-              className="ghost-button"
-              disabled={isScanning || selectedIdSet.size === 0 || !gentleUnlocked}
-              onClick={() => void handleBatchMove("gentle")}
-              type="button"
-            >
-              Move selected to Gentle…
-            </button>
+            <div className="toolbar-group" role="group" aria-label="Select">
+              <button className="ghost-button" disabled={isScanning} type="button" onClick={() => void selectAllMode("normal")}>
+                <span className="mode-icon mode-icon-normal" aria-hidden="true" /> Select all Normal
+              </button>
+              <button className="ghost-button" disabled={isScanning || !gentleUnlocked} title={gentleUnlocked ? "Select every Gentle video, including unloaded pages" : "Unlock Gentle mode to select its videos"} type="button" onClick={() => void selectAllMode("gentle")}>
+                <span className="mode-icon mode-icon-gentle" aria-hidden="true" /> Select all Gentle
+              </button>
+              <button
+                className="ghost-button"
+                disabled={isScanning}
+                onClick={selectMissingPosterTitles}
+                type="button"
+              >
+                Select missing posters
+              </button>
+            </div>
+            <div className="toolbar-group" role="group" aria-label="Selected titles">
+              <button
+                className="ghost-button"
+                disabled={isScanning || selectedIdSet.size === 0}
+                onClick={() => void handleRefreshSelectedPosters()}
+                type="button"
+              >
+                Regenerate selected posters
+              </button>
+              <button
+                className="ghost-button"
+                disabled={isScanning || selectedIdSet.size === 0}
+                onClick={() => void handleBatchMove("normal")}
+                type="button"
+              >
+                Move selected to Normal…
+              </button>
+              <button
+                className="ghost-button"
+                disabled={isScanning || selectedIdSet.size === 0 || !gentleUnlocked}
+                onClick={() => void handleBatchMove("gentle")}
+                type="button"
+              >
+                Move selected to Gentle…
+              </button>
+            </div>
           </div>
         </div>
 

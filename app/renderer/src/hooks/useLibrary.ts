@@ -10,7 +10,20 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPage, LibraryMode, MovieModeCounts, MovieRecord } from "../../../shared/contracts";
+import { SORT_MODES, type SortMode } from "../../../shared/librarySort";
 import { deriveRegionLabel, deriveStudioName, deriveTagLabel } from "../utils";
+
+const SORT_MODE_STORAGE_KEY = "mla-sort-mode";
+
+function loadSavedSortMode(): SortMode {
+  try {
+    const saved = localStorage.getItem(SORT_MODE_STORAGE_KEY);
+    if (saved && (SORT_MODES as string[]).includes(saved)) return saved as SortMode;
+  } catch {
+    // localStorage unavailable (tests, privacy mode) — fall through to default
+  }
+  return "recent-add";
+}
 
 const PAGE_SIZE = 200;
 
@@ -35,9 +48,7 @@ export function useLibrary({
   const [movieTotalCount, setMovieTotalCount] = useState(0);
   const [movieModeCounts, setMovieModeCounts] = useState<MovieModeCounts>({ total: 0, normal: 0, gentle: 0 });
   const [movieLoadOffset, setMovieLoadOffset] = useState(0);
-  const [sortMode, setSortMode] = useState<
-    "actress" | "import-date" | "dvd-id" | "studio" | "tag" | "actress-age" | "recent-add" | "oldest" | "newest"
-  >("recent-add");
+  const [sortMode, setSortMode] = useState<SortMode>(loadSavedSortMode);
   const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [allMoviesPool, setAllMoviesPool] = useState<MovieRecord[]>([]);
@@ -306,6 +317,15 @@ export function useLibrary({
     localStorage.setItem("mla-grid-cols", String(clamped));
   }
 
+  function changeSortMode(mode: SortMode): void {
+    setSortMode(mode);
+    try {
+      localStorage.setItem(SORT_MODE_STORAGE_KEY, mode);
+    } catch {
+      // localStorage unavailable — session-only persistence is fine
+    }
+  }
+
   function changeActressGridCols(cols: number): void {
     const clamped = Math.max(2, Math.min(9, cols));
     setActressGridCols(clamped);
@@ -321,7 +341,7 @@ export function useLibrary({
     movieLoadOffset,
     setMovieLoadOffset,
     sortMode,
-    setSortMode,
+    setSortMode: changeSortMode,
     selectedMovieId,
     setSelectedMovieId,
     searchInput,

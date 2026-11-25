@@ -1,5 +1,3 @@
-import type React from "react";
-
 interface ActressContextMenuState {
   name: string;
   x: number;
@@ -9,13 +7,13 @@ interface ActressContextMenuState {
 interface ActressContextMenuProps {
   menu: ActressContextMenuState;
   onClose: () => void;
-  onAddPhoto: () => void;
+  /** Opens a file picker to set the actress's profile photo. */
   onSetPhoto: () => void;
   onRemovePhoto: () => void;
   onViewTitles: () => void;
 }
 
-export function ActressContextMenu({ menu, onClose, onAddPhoto, onSetPhoto, onRemovePhoto, onViewTitles }: ActressContextMenuProps) {
+export function ActressContextMenu({ menu, onClose, onSetPhoto, onRemovePhoto, onViewTitles }: ActressContextMenuProps) {
   const { name, x, y } = menu;
   return (
     <div
@@ -41,13 +39,8 @@ export function ActressContextMenu({ menu, onClose, onAddPhoto, onSetPhoto, onRe
         </li>
         <li className="ctx-sep" />
         <li>
-          <button className="ctx-item" onClick={onAddPhoto} type="button">
-            Add photo
-          </button>
-        </li>
-        <li>
           <button className="ctx-item" onClick={onSetPhoto} type="button">
-            Set photo
+            Set profile photo…
           </button>
         </li>
         <li>

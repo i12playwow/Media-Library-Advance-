@@ -12,6 +12,7 @@ interface UseKeyboardShortcutsOptions {
   setActivePage?: (page: AppPage) => void;
   setContextMenu?: (v: null) => void;
   setShowScanOptionsPrompt?: (v: boolean) => void;
+  setShowPinPrompt?: (v: boolean) => void;
   setPlayerShowSubPanel?: (v: boolean) => void;
   setPlayerShowMovieList?: (v: boolean) => void;
   setPlayerPlaying?: (v: boolean) => void;
@@ -36,6 +37,7 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     setActivePage,
     setContextMenu,
     setShowScanOptionsPrompt,
+    setShowPinPrompt,
     setPlayerShowSubPanel,
     setPlayerShowMovieList,
     setPlayerPlaying,
@@ -130,6 +132,12 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
       if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "G") {
         e.preventDefault();
         openScanOptions?.("gentle");
+        return;
+      }
+      // Ctrl+Shift+P → open the Gentle unlock prompt
+      if (e.ctrlKey && e.shiftKey && e.key.toUpperCase() === "P") {
+        e.preventDefault();
+        setShowPinPrompt?.(true);
         return;
       }
       if (isFormField) return;
