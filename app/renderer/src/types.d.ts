@@ -11,6 +11,7 @@ import type {
   OnlineSubtitleResult,
   OrganizationSettings,
   MovieLabelMode,
+  MovieLabelField,
   PlaybackCheckpoint,
   PlayerSettings,
   PosterBackfillSummary,
@@ -40,6 +41,7 @@ declare global {
       setThemeMode: (themeMode: "dark" | "light") => Promise<AppShellState>;
       setDisplayName: (name: string) => Promise<AppShellState>;
       setMovieLabelMode: (mode: MovieLabelMode) => Promise<AppShellState>;
+      setMovieLabelFields: (fields: readonly MovieLabelField[]) => Promise<AppShellState>;
       getAppState: () => Promise<AppShellState>;
       openBrowser?: () => Promise<void>;
       getGuardsChainState: () => Promise<GuardsChainState>;

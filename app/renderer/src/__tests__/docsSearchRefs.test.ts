@@ -785,11 +785,11 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     fragments: [
       // The whole statement is pinned, COALESCEs included: the upsert's
       // conflict behavior is part of the search contract.
-      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at, source_missing = 0",
+      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, studio, series, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @studio, @series, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, studio = COALESCE(excluded.studio, movies.studio), series = COALESCE(excluded.series, movies.series), updated_at = excluded.updated_at, source_missing = 0",
     ],
     exact: [
       "none",
-      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, updated_at = excluded.updated_at, source_missing = 0",
+      "INSERT INTO movies ( id, title, year, video_id, source_path, folder_path, library_mode, resolution, poster_url, poster_source, actresses_json, keywords_json, studio, series, updated_at ) VALUES ( @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution, @posterUrl, @posterSource, @actressesJson, @keywordsJson, @studio, @series, @updatedAt ) ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, video_id = COALESCE(excluded.video_id, movies.video_id), source_path = excluded.source_path, folder_path = excluded.folder_path, library_mode = excluded.library_mode, resolution = excluded.resolution, poster_url = COALESCE(excluded.poster_url, movies.poster_url), poster_source = CASE WHEN excluded.poster_url IS NOT NULL THEN excluded.poster_source ELSE movies.poster_source END, actresses_json = excluded.actresses_json, keywords_json = excluded.keywords_json, studio = COALESCE(excluded.studio, movies.studio), series = COALESCE(excluded.series, movies.series), updated_at = excluded.updated_at, source_missing = 0",
     ],
   },
   {
@@ -823,6 +823,13 @@ const SEARCH_WRITE_PATHS: Array<{ method: string; fragments: string[]; exact: st
     method: "updateMovieLocation",
     fragments: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
     exact: ["UPDATE movies SET source_path = ?, folder_path = ?, library_mode = ?, updated_at = ? WHERE id = ?"],
+  },
+  {
+    method: "updateMovieStudioSeries",
+    // Studio/series are card labels only: COALESCE keeps whatever the NFO
+    // scan already stored, so a manual edit with no value cannot wipe them.
+    fragments: ["UPDATE movies SET studio = COALESCE(?, studio), series = COALESCE(?, series), updated_at = ? WHERE id = ?"],
+    exact: ["UPDATE movies SET studio = COALESCE(?, studio), series = COALESCE(?, series), updated_at = ? WHERE id = ?"],
   },
   {
     method: "updateMoviePoster",

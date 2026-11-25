@@ -30,7 +30,7 @@ this table):
 
 | Prefix | Owns | Channels |
 |---|---|---|
-| `settings:*` | preferences and metadata/organization settings | `settings:getGentleShortcut`, `settings:setGentleShortcut`, `settings:verifyGentlePin`, `settings:getThemeMode`, `settings:setThemeMode`, `settings:saveMetadata`, `settings:saveOrganization`, `settings:pickLibraryFolder`, `settings:setDisplayName`, `settings:setMovieLabelMode`, `settings:getFtsHealth`, `settings:rebuildFtsIndex` |
+| `settings:*` | preferences and metadata/organization settings | `settings:getGentleShortcut`, `settings:setGentleShortcut`, `settings:verifyGentlePin`, `settings:getThemeMode`, `settings:setThemeMode`, `settings:saveMetadata`, `settings:saveOrganization`, `settings:pickLibraryFolder`, `settings:setDisplayName`, `settings:setMovieLabelMode`, `settings:setMovieLabelFields`, `settings:getFtsHealth`, `settings:rebuildFtsIndex` |
 | `gentle:*` | gentle mode state changes | `gentle:toggle` (invoke), `gentle:unlockResult` (push) |
 | `auth:*` | the same gentle gate, named for who may call it | `auth:unlockGentle` (PIN), `auth:toggleGentle` (shortcut) |
 | `app:*` | whole-shell snapshot and browser launch | `app:getState`, `app:openBrowser` |
@@ -45,7 +45,7 @@ this table):
 | `duplicates:*` | duplicate resolution | `duplicates:resolve` |
 | `guards:*` | guards-chain integrity state for the Settings page | `guards:getChainState`, `guards:listSegments` |
 
-14 prefixes, 85 invoke channels (one `ipcMain.handle` each, all in main.ts),
+14 prefixes, 86 invoke channels (one `ipcMain.handle` each, all in main.ts),
 5 push channels (one `webContents.send` each, all in main.ts, subscribed via
 `onScanProgress`, `onGentleUnlockResult`, and
 `onSubtitleModelDownloadProgress`, `onProcessingChanged`, and
@@ -53,7 +53,7 @@ this table):
 
 Two invariants worth knowing beyond the table:
 
-- **Every named channel is real.** Each of the 85 invoke channels has a
+- **Every named channel is real.** Each of the 86 invoke channels has a
   matching `ipcMain.handle` in `app/main/main.ts` — the lint fails if an
   expose dangles or a handle has no expose. (Recreating this doc surfaced
   real rot: the `subtitle:addDir` / `subtitle:removeDir` / `subtitle:scan`

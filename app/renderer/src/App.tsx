@@ -10,7 +10,7 @@ import type {
   AppPage,
   AppShellState,
   LibraryMode,
-  MovieLabelMode,
+  MovieLabelField,
   MovieRecord,
 } from "../../shared/contracts";
 import { AppSidebar } from "./components/AppSidebar";
@@ -728,7 +728,7 @@ export function App() {
             loadMoreMovies={loadMoreMovies}
             PAGE_SIZE={PAGE_SIZE}
             onPlayMovie={handlePlayMovieFromLibrary}
-            movieLabelMode={appState.movieLabelMode}
+            movieLabelFields={appState.movieLabelFields}
           />
         </BrowsePageMemory>
 
@@ -776,7 +776,7 @@ export function App() {
             setActivePage={setActivePage}
             setContextMenu={setContextMenu}
           setActressContextMenu={setActressContextMenu}
-          movieLabelMode={appState.movieLabelMode}
+          movieLabelFields={appState.movieLabelFields}
           selectedActressPhotos={selectedActressPhotos}
           selectedActressRegion={selectedActressRegionDraft}
           setSelectedActressRegion={setSelectedActressRegionDraft}
@@ -850,10 +850,10 @@ export function App() {
             themeModeDraft={themeModeDraft}
             setThemeModeDraft={setThemeModeDraft}
             onSaveThemeMode={handleSaveThemeMode}
-            onSaveMovieLabelMode={async (mode: MovieLabelMode) => {
-              const nextState = await desktopApi.setMovieLabelMode(mode);
+            onSaveMovieLabelFields={async (fields: MovieLabelField[]) => {
+              const nextState = await desktopApi.setMovieLabelFields(fields);
               setAppState(nextState);
-              setStatusMessage("Movie tile labels saved.");
+              setStatusMessage(`Movie tile labels saved: ${fields.length} field${fields.length === 1 ? "" : "s"}.`);
             }}
             organizationPreview={organizationPreview}
             onSaveOrganizationSettings={handleSaveOrganizationSettings}

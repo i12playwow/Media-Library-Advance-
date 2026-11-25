@@ -54,6 +54,8 @@ openPlayerWindow: (id?: string | null): Promise<{ok:boolean}> => ipcRenderer.inv
     ipcRenderer.invoke("settings:setDisplayName", name),
   setMovieLabelMode: (mode: "display-name" | "title" | "filename"): Promise<AppShellState> =>
     ipcRenderer.invoke("settings:setMovieLabelMode", mode),
+  setMovieLabelFields: (fields: readonly string[]): Promise<AppShellState> =>
+    ipcRenderer.invoke("settings:setMovieLabelFields", fields),
   getAppState: (): Promise<AppShellState> =>
     ipcRenderer.invoke("app:getState"),
   openBrowser: (): Promise<void> => ipcRenderer.invoke("app:openBrowser"),

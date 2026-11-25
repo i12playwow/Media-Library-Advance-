@@ -116,6 +116,10 @@ export interface MovieRecord {
   posterSource: PosterSource;
   actresses: string[];
   keywords: string[];
+  /** Maker/label from the embedded NFO sidecar, when one was present. */
+  studio?: string | null;
+  /** Series name from the embedded NFO sidecar, when one was present. */
+  series?: string | null;
   subtitles: SubtitleRecord[];
   updatedAt: string;
   sourceMissing?: boolean;
@@ -202,6 +206,11 @@ export interface MediaJobEnqueueResult {
 
 export type MovieLabelMode = "display-name" | "title" | "filename";
 
+/** Which metadata lines a library card shows. See shared/movieLabels.ts for
+ *  the catalogue; `title` is always present so a card is never blank. */
+import type { MovieLabelField } from "./movieLabels";
+export type { MovieLabelField } from "./movieLabels";
+
 export interface AppShellState {
   version: string;
   platform: string;
@@ -209,6 +218,8 @@ export interface AppShellState {
   themeMode: "dark" | "light";
   displayName: string;
   movieLabelMode: MovieLabelMode;
+  /** Ordered list of metadata lines shown on library cards. */
+  movieLabelFields: MovieLabelField[];
   roots: LibraryRoots;
   subtitleDirs: string[];
   starterPinHint: string;

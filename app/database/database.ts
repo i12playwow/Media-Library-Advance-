@@ -16,6 +16,7 @@ import type {
   SubtitleRecord
 } from "../shared/contracts";
 import { DEFAULT_ORGANIZATION_SETTINGS } from "../shared/organizationTemplates";
+import { DEFAULT_MOVIE_LABEL_FIELDS, normalizeMovieLabelFields, type MovieLabelField } from "../shared/movieLabels";
 
 interface MovieRow {
   id: string;
@@ -31,6 +32,8 @@ interface MovieRow {
   poster_source: PosterSource;
   actresses_json: string;
   keywords_json: string;
+  studio: string | null;
+  series: string | null;
   updated_at: string;
   source_missing?: number;
 }
@@ -69,6 +72,10 @@ export interface MovieInput {
   posterSource?: PosterSource;
   actresses: string[];
   keywords: string[];
+  /** Optional NFO-supplied maker and series; omitted callers keep the
+   *  existing values on an update (see the COALESCE in upsertMovie). */
+  studio?: string | null;
+  series?: string | null;
 }
 
 interface UpdateMovieLocationInput {
@@ -182,6 +189,24 @@ export class DatabaseClient {
 
   setMovieLabelMode(mode: "display-name" | "title" | "filename"): void {
     this.setSetting("movie_label_mode", mode);
+  }
+
+  /** Ordered card fields (DVD ID, title, actress, tag, studio…). Older
+   *  installs have no setting yet and fall back to the shipped default. */
+  getMovieLabelFields(): MovieLabelField[] {
+    const raw = this.getSetting("movie_label_fields");
+    if (!raw) {
+      return [...DEFAULT_MOVIE_LABEL_FIELDS];
+    }
+    try {
+      return normalizeMovieLabelFields(JSON.parse(raw));
+    } catch {
+      return [...DEFAULT_MOVIE_LABEL_FIELDS];
+    }
+  }
+
+  setMovieLabelFields(fields: unknown): void {
+    this.setSetting("movie_label_fields", JSON.stringify(normalizeMovieLabelFields(fields)));
   }
 
   getActressPhotos(name: string): string[] {
@@ -438,10 +463,10 @@ export class DatabaseClient {
         `
           INSERT INTO movies (
             id, title, year, video_id, source_path, folder_path, library_mode, resolution,
-            poster_url, poster_source, actresses_json, keywords_json, updated_at
+            poster_url, poster_source, actresses_json, keywords_json, studio, series, updated_at
           ) VALUES (
             @id, @title, @year, @videoId, @sourcePath, @folderPath, @libraryMode, @resolution,
-            @posterUrl, @posterSource, @actressesJson, @keywordsJson, @updatedAt
+            @posterUrl, @posterSource, @actressesJson, @keywordsJson, @studio, @series, @updatedAt
           )
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
@@ -458,6 +483,8 @@ export class DatabaseClient {
             END,
             actresses_json = excluded.actresses_json,
             keywords_json = excluded.keywords_json,
+            studio = COALESCE(excluded.studio, movies.studio),
+            series = COALESCE(excluded.series, movies.series),
             updated_at = excluded.updated_at,
             source_missing = 0
         `
@@ -475,6 +502,8 @@ export class DatabaseClient {
         posterSource: movie.posterSource ?? "none",
         actressesJson: JSON.stringify(movie.actresses),
         keywordsJson: JSON.stringify(movie.keywords),
+        studio: movie.studio?.trim() || null,
+        series: movie.series?.trim() || null,
         updatedAt: now
       });
     this.ftsIndexMovie(movie.id);
@@ -857,6 +886,20 @@ export class DatabaseClient {
         `
       )
       .run(posterUrl, posterSource, new Date().toISOString(), id);
+  }
+
+  /** Write the maker/series pair read from an NFO sidecar, leaving values in
+   *  place when the sidecar does not carry that field. */
+  updateMovieStudioSeries(id: string, studio: string | null, series: string | null): void {
+    this.db
+      .prepare(
+        `
+          UPDATE movies
+          SET studio = COALESCE(?, studio), series = COALESCE(?, series), updated_at = ?
+          WHERE id = ?
+        `
+      )
+      .run(studio?.trim() || null, series?.trim() || null, new Date().toISOString(), id);
   }
 
   updateMovieVideoId(id: string, videoId: string): void {
@@ -1256,6 +1299,8 @@ export class DatabaseClient {
       posterSource: row.poster_source,
       actresses: this.safeJsonArray(row.actresses_json),
       keywords: this.safeJsonArray(row.keywords_json),
+      studio: row.studio?.trim() || null,
+      series: row.series?.trim() || null,
       subtitles,
       updatedAt: row.updated_at,
       sourceMissing: row.source_missing === 1
@@ -1326,6 +1371,8 @@ export class DatabaseClient {
         poster_source TEXT NOT NULL DEFAULT 'none',
         actresses_json TEXT NOT NULL DEFAULT '[]',
         keywords_json TEXT NOT NULL DEFAULT '[]',
+        studio TEXT,
+        series TEXT,
         updated_at TEXT NOT NULL
       );
 
@@ -1405,6 +1452,8 @@ export class DatabaseClient {
       "ALTER TABLE movies ADD COLUMN poster_source TEXT NOT NULL DEFAULT 'none'"
     );
     this.ensureColumn("movies", "video_id", "ALTER TABLE movies ADD COLUMN video_id TEXT");
+    this.ensureColumn("movies", "studio", "ALTER TABLE movies ADD COLUMN studio TEXT");
+    this.ensureColumn("movies", "series", "ALTER TABLE movies ADD COLUMN series TEXT");
 
     // Performance indexes — created once, silently skipped if they already exist
     this.db.exec(`

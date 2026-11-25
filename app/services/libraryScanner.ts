@@ -353,6 +353,12 @@ export async function scanLibraries(
         ? (metadataTitle || nfoTitle || candidate.parsed.title)
         : candidate.parsed.title;
 
+      // Studio/series come from the NFO sidecar when present; the online
+      // provider's maker name is the fallback so the tile field is not empty
+      // for movies without a sidecar.
+      const resolvedStudio = nfoData.studio?.trim() || onlineMetadata?.modelName?.trim() || null;
+      const resolvedSeries = nfoData.series?.trim() || null;
+
       const processed = await withMutationLock(() =>
         applyProcessingOptions({
           libraryMode: candidate.mode,
@@ -396,7 +402,9 @@ export async function scanLibraries(
           posterUrl: onlineMetadata?.posterUrl ?? null,
           posterSource: onlineMetadata?.posterUrl ? onlineMetadata.source : "none",
           actresses,
-          keywords: candidate.parsed.keywords
+          keywords: candidate.parsed.keywords,
+          studio: resolvedStudio,
+          series: resolvedSeries
         });
         database.replaceSubtitles(movieId, subtitleRecords);
                 await importHistory.record(processed.videoPath, movieId);

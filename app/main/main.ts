@@ -151,6 +151,7 @@ function buildShellState(): AppShellState {
     themeMode: database.getThemeMode(),
     displayName: database.getDisplayName(),
     movieLabelMode: database.getMovieLabelMode(),
+    movieLabelFields: database.getMovieLabelFields(),
     roots: database.getRoots(),
     starterPinHint: database.getStarterPinHint(),
     metadataSettings: database.getMetadataSettings(),
@@ -1067,6 +1068,14 @@ ipcMain.handle("player:windowAction",playerWindow.windowAction);
 
   ipcMain.handle("settings:setMovieLabelMode", async (_event, mode: MovieLabelMode) => {
     database.setMovieLabelMode(mode === "title" || mode === "filename" ? mode : "display-name");
+    return buildShellState();
+  });
+
+  // Multi-select tile label: the renderer sends the ticked fields in display
+  // order. Sanitising lives in the database layer (normalizeMovieLabelFields),
+  // so a stale or hostile payload can never blank out a card.
+  ipcMain.handle("settings:setMovieLabelFields", async (_event, fields: unknown) => {
+    database.setMovieLabelFields(fields);
     return buildShellState();
   });
 

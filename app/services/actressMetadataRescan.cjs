@@ -12,7 +12,7 @@ function nameKey(value) {
 async function rescanActressMetadata(database, { isGentleUnlocked, parseNfoXml }) {
   const includeGentle = isGentleUnlocked();
   const rows = database.db.prepare("SELECT id, source_path, library_mode FROM movies WHERE library_mode = 'normal' OR ?").all(includeGentle ? 1 : 0);
-  const summary = { checked: 0, updated: 0, unknown: 0, unreadable: 0 };
+  const summary = { checked: 0, updated: 0, unknown: 0, unreadable: 0, studios: 0 };
   const stalled = new Set();
   let cachedFolder;
   let cachedEntries;
@@ -30,6 +30,8 @@ async function rescanActressMetadata(database, { isGentleUnlocked, parseNfoXml }
     if (row.library_mode === 'gentle' && !isGentleUnlocked()) continue;
     summary.checked++;
     let addedNames = [];
+    let nfoStudio = null;
+    let nfoSeries = null;
     const root = path.parse(row.source_path).root.toLowerCase();
     if (!stalled.has(root)) {
       let timer;
@@ -39,7 +41,12 @@ async function rescanActressMetadata(database, { isGentleUnlocked, parseNfoXml }
           new Promise(resolve => { timer = setTimeout(resolve, 3000); })
         ]);
         if (xml === undefined) { stalled.add(root); summary.unreadable++; }
-        else if (xml) addedNames = parseNfoXml(xml).actresses || [];
+        else if (xml) {
+          const parsed = parseNfoXml(xml);
+          addedNames = parsed.actresses || [];
+          nfoStudio = parsed.studio || null;
+          nfoSeries = parsed.series || null;
+        }
       } catch { summary.unreadable++; }
       finally { clearTimeout(timer); }
     } else summary.unreadable++;
@@ -56,8 +63,16 @@ async function rescanActressMetadata(database, { isGentleUnlocked, parseNfoXml }
       cast.push(name);
     }
     if (!keys.size) summary.unknown++;
-    if (cast.length !== movie.actresses.length) {
-      database.upsertMovie({ ...movie, actresses: cast });
+    let changed = false;
+    // Backfill Studio/Series too: the tile can show them, and older imports
+    // predate those columns, so a rescan is the cheap way to fill them in.
+    let studio = movie.studio || null;
+    let series = movie.series || null;
+    if (!studio && nfoStudio) { studio = nfoStudio; changed = true; summary.studios++; }
+    if (!series && nfoSeries) { series = nfoSeries; changed = true; }
+    if (cast.length !== movie.actresses.length) changed = true;
+    if (changed) {
+      database.upsertMovie({ ...movie, actresses: cast, studio, series });
       summary.updated++;
     }
     if (summary.checked % 32 === 0) await new Promise(resolve => setImmediate(resolve));

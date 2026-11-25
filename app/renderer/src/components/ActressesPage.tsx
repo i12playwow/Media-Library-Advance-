@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { ActressMetadataRescanSummary, AppPage, LibraryMode, MovieLabelMode, MovieRecord } from "../../../shared/contracts";
+import type { ActressMetadataRescanSummary, AppPage, LibraryMode, MovieLabelField, MovieRecord } from "../../../shared/contracts";
 import { MovieTile } from "./MovieTile";
 
 interface ActressEntry {
@@ -46,12 +46,12 @@ interface ActressesPageProps {
   onSetPrimaryActressPhoto: (name: string, photoUrl: string) => Promise<void>;
   onSaveActressRegion: (name: string, region: string) => Promise<void>;
   onRefreshActressPhotos: () => Promise<void>;
-  movieLabelMode: MovieLabelMode;
+  movieLabelFields: MovieLabelField[];
 }
 
 const ACTRESS_REGIONS = ['Japan','Chinese','America','Spain','Korea','France','Germany','Italy','Unknown'];
 
-export function ActressesPage({ actressDirectory, selectedActress, setSelectedActress, actressGridCols, changeActressGridCols, actressModeFilter, setActressModeFilter, gentleUnlocked, actressSortMode, setActressSortMode, isRefreshingActressPhotos, allMoviesPool, movies, selectedMovieId, setSelectedMovieId, setActivePage, setContextMenu, setActressContextMenu, selectedActressPhotos, selectedActressRegion, setSelectedActressRegion, onAddActressPhoto, onRemoveActressPhoto, onSetPrimaryActressPhoto, onSaveActressRegion, onRefreshActressPhotos, onAssignMovies, onPlayMovie, onRescanMetadata, movieLabelMode }: ActressesPageProps) {
+export function ActressesPage({ actressDirectory, selectedActress, setSelectedActress, actressGridCols, changeActressGridCols, actressModeFilter, setActressModeFilter, gentleUnlocked, actressSortMode, setActressSortMode, isRefreshingActressPhotos, allMoviesPool, movies, selectedMovieId, setSelectedMovieId, setActivePage, setContextMenu, setActressContextMenu, selectedActressPhotos, selectedActressRegion, setSelectedActressRegion, onAddActressPhoto, onRemoveActressPhoto, onSetPrimaryActressPhoto, onSaveActressRegion, onRefreshActressPhotos, onAssignMovies, onPlayMovie, onRescanMetadata, movieLabelFields }: ActressesPageProps) {
   const [rescanning, setRescanning] = useState(false);
   const [rescanNotice, setRescanNotice] = useState("");
   async function rescanMetadata() {
@@ -160,7 +160,7 @@ export function ActressesPage({ actressDirectory, selectedActress, setSelectedAc
       <div className="actress-profile-tools"><label className="form-field"><span>Region</span><input className="search-input" list="actress-region-options" value={selectedActressRegion} onChange={event=>setSelectedActressRegion(event.target.value)}/><datalist id="actress-region-options">{ACTRESS_REGIONS.map(value=><option key={value} value={value}/>)}</datalist></label><button className="ghost-button" type="button" onClick={()=>void onSaveActressRegion(active.name,selectedActressRegion)}>Save region</button><button className="ghost-button" type="button" disabled={!selectedActressPhotos.length} onClick={()=>void onRemoveActressPhoto(active.name)}>Remove profile photos</button></div>
       {selectedActressPhotos.length>0&&<div className="actress-gallery">{selectedActressPhotos.map((photo,index)=><div className="actress-gallery-card" key={photo}><button className={`actress-gallery-item${index===0?' primary':''}`} type="button" aria-label={`${index===0?'Primary photo of':'Set primary photo of'} ${active.name} ${index+1}`} onClick={()=>void onSetPrimaryActressPhoto(active.name,photo)}><img src={photo} alt={`${active.name} ${index+1}`} loading="lazy"/></button><button className="ghost-button" type="button" onClick={()=>void onRemoveActressPhoto(active.name,photo)}>Remove photo {index+1}</button></div>)}</div>}
       <div className="actress-profile-movies-header"><h4>Movies in your library</h4><label className="form-field"><span>Find movies in this profile</span><input className="search-input" value={movieQuery} placeholder="Title or movie code" onChange={event=>{setMovieQuery(event.target.value);setMovieLimit(60);}}/></label></div>
-      <div className="movie-grid actress-title-grid" style={{'--cols':4} as React.CSSProperties}>{actressMovies.slice(0,movieLimit).map(movie=><MovieTile key={movie.id} movie={movie} labelMode={movieLabelMode} isActive={movie.id===selectedMovieId} separator="dot" onContextMenu={event=>{event.preventDefault();setContextMenu({movie,x:event.clientX,y:event.clientY});}} onClick={()=>play(movie)} onPlay={()=>play(movie)}/>)}</div>
+      <div className="movie-grid actress-title-grid" style={{'--cols':4} as React.CSSProperties}>{actressMovies.slice(0,movieLimit).map(movie=><MovieTile key={movie.id} movie={movie} labelFields={movieLabelFields} isActive={movie.id===selectedMovieId} separator="dot" onContextMenu={event=>{event.preventDefault();setContextMenu({movie,x:event.clientX,y:event.clientY});}} onClick={()=>play(movie)} onPlay={()=>play(movie)}/>)}</div>
       {!actressMovies.length&&<p className="subtle">No matching movies. Clear the movie search or link more library movies.</p>}{actressMovies.length>movieLimit&&<div className="load-more-bar" ref={movieSentinelRef}><span className="load-more-count">Showing {Math.min(movieLimit,actressMovies.length)} of {actressMovies.length} movies</span><button className="ghost-button" type="button" onClick={()=>setMovieLimit(current=>Math.min(current+60,actressMovies.length))}>Load more movies</button></div>}
     </div> : <div className="panel actresses-overview-panel">
       <div className="panel-header"><div><h3>Actresses</h3><p className="subtle">{actressDirectory.length} profiles from {visiblePool.length} accessible library movies</p></div><div className="inline-actions">{rescanButton}<button className="primary-button" type="button" onClick={()=>openLinker('')}>Add actress to movies</button><button className="ghost-button" type="button" disabled={isRefreshingActressPhotos} onClick={()=>void onRefreshActressPhotos()}>{isRefreshingActressPhotos?'Fetching photos…':'Refresh photos'}</button></div></div>

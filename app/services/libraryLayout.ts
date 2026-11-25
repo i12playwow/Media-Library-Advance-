@@ -278,6 +278,7 @@ export function parseNfoXml(xml: string): {
   year?: number;
   actresses?: string[];
   studio?: string;
+  series?: string;
 } {
   const result: {
     title?: string;
@@ -285,6 +286,7 @@ export function parseNfoXml(xml: string): {
     year?: number;
     actresses?: string[];
     studio?: string;
+    series?: string;
   } = {};
 
   const titleMatch = xml.match(/<title>([\s\S]*?)<\/title>/);
@@ -301,6 +303,9 @@ export function parseNfoXml(xml: string): {
 
   const studioMatch = xml.match(/<studio>([\s\S]*?)<\/studio>/);
   if (studioMatch) result.studio = studioMatch[1].trim();
+
+  const seriesMatch = xml.match(/<series>([\s\S]*?)<\/series>/);
+  if (seriesMatch) result.series = seriesMatch[1].trim();
 
   const actresses = [...xml.matchAll(/<actor\b[^>]*>([\s\S]*?)<\/actor\s*>/gi)]
     .map(([, actor]) => actor.match(/<name\b[^>]*>([\s\S]*?)<\/name\s*>/i)?.[1].trim() ?? "")

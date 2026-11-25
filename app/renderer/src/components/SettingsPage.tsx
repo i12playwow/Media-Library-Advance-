@@ -4,13 +4,18 @@ import { LibraryHealthSection } from "./LibraryHealthSection";
 import type {
   AppShellState,
   MetadataSettings,
-  MovieLabelMode,
+  MovieLabelField,
   OrganizationSettings,
   PlayerSettings,
   SubtitleGenerationModel,
   SubtitleModelAvailability,
   SubtitleScanResult,
 } from "../../../shared/contracts";
+import {
+  DEFAULT_MOVIE_LABEL_FIELDS,
+  MOVIE_LABEL_FIELDS,
+  normalizeMovieLabelFields,
+} from "../../../shared/movieLabels";
 import {
   DEFAULT_ORGANIZATION_SETTINGS,
   ORGANIZATION_TEMPLATE_TOKENS,
@@ -32,6 +37,22 @@ interface GentleSaveStatus {
   tone: "success" | "error";
 }
 
+/** Swaps one field with its neighbour so the operator can order the rows the
+ *  way the cards should read. Out-of-range moves are a no-op. */
+function moveLabelField(
+  fields: readonly MovieLabelField[],
+  index: number,
+  delta: -1 | 1
+): MovieLabelField[] {
+  const next = [...fields];
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= next.length) {
+    return next;
+  }
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
 interface SettingsPageProps {
   appState: AppShellState;
 
@@ -47,7 +68,7 @@ interface SettingsPageProps {
   themeModeDraft: "dark" | "light";
   setThemeModeDraft: React.Dispatch<React.SetStateAction<"dark" | "light">>;
   onSaveThemeMode: () => Promise<void>;
-  onSaveMovieLabelMode: (mode: MovieLabelMode) => Promise<void>;
+  onSaveMovieLabelFields: (fields: MovieLabelField[]) => Promise<void>;
   organizationPreview: OrganizationPreview;
   onSaveOrganizationSettings: () => Promise<void>;
   applyOrganizationPreset: (preset: OrganizationSettings) => void;
@@ -82,7 +103,7 @@ export function SettingsPage({
   themeModeDraft,
   setThemeModeDraft,
   onSaveThemeMode,
-  onSaveMovieLabelMode,
+  onSaveMovieLabelFields,
   organizationPreview,
   onSaveOrganizationSettings,
   applyOrganizationPreset,
@@ -105,8 +126,10 @@ export function SettingsPage({
   const [gentleSaveStatus, setGentleSaveStatus] = useState<GentleSaveStatus | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState(appState.displayName);
   const [displayNameSaved, setDisplayNameSaved] = useState(false);
-  const [movieLabelModeDraft, setMovieLabelModeDraft] = useState<MovieLabelMode>(appState.movieLabelMode);
-  const [movieLabelModeSaved, setMovieLabelModeSaved] = useState(false);
+  const [movieLabelFieldsDraft, setMovieLabelFieldsDraft] = useState<MovieLabelField[]>(
+    () => normalizeMovieLabelFields(appState.movieLabelFields)
+  );
+  const [movieLabelFieldsSaved, setMovieLabelFieldsSaved] = useState(false);
   const [subtitleModelStatuses, setSubtitleModelStatuses] = useState<SubtitleModelAvailability[]>([]);
   const [isRefreshingSubtitleModels, setIsRefreshingSubtitleModels] = useState(false);
 
@@ -164,13 +187,13 @@ export function SettingsPage({
     }
   };
 
-  const handleSaveMovieLabelMode = async () => {
+  const handleSaveMovieLabelFields = async () => {
     try {
-      await onSaveMovieLabelMode(movieLabelModeDraft);
-      setMovieLabelModeSaved(true);
-      window.setTimeout(() => setMovieLabelModeSaved(false), 1800);
+      await onSaveMovieLabelFields(normalizeMovieLabelFields(movieLabelFieldsDraft));
+      setMovieLabelFieldsSaved(true);
+      window.setTimeout(() => setMovieLabelFieldsSaved(false), 1800);
     } catch {
-      setMovieLabelModeSaved(false);
+      setMovieLabelFieldsSaved(false);
     }
   };
   return (
@@ -663,18 +686,84 @@ export function SettingsPage({
                 value={displayNameDraft}
               />
             </label>
-            <label className="form-field">
+            <div className="form-field">
               <span>Movie tile labels</span>
-              <select
-                className="search-input"
-                onChange={(event) => setMovieLabelModeDraft(event.target.value as MovieLabelMode)}
-                value={movieLabelModeDraft}
-              >
-                <option value="display-name">Display name, then title</option>
-                <option value="title">Metadata title</option>
-                <option value="filename">Source filename</option>
-              </select>
-            </label>
+              <p className="subtle">
+                Tick every metadata line a library card should show. Title is always on
+                and becomes the headline; the rest print as rows underneath, in the
+                order listed here.
+              </p>
+              <ul className="label-field-list">
+                {MOVIE_LABEL_FIELDS.map((meta) => {
+                  const index = movieLabelFieldsDraft.indexOf(meta.field);
+                  const checked = index !== -1;
+                  return (
+                    <li
+                      className={`label-field${checked ? " checked" : ""}`}
+                      key={meta.field}
+                    >
+                      <label className="toggle-field">
+                        <input
+                          checked={checked || meta.required === true}
+                          disabled={meta.required === true}
+                          onChange={(event) => {
+                            setMovieLabelFieldsDraft((current) =>
+                              event.target.checked
+                                ? normalizeMovieLabelFields([...current, meta.field])
+                                : normalizeMovieLabelFields(
+                                    current.filter((field) => field !== meta.field)
+                                  )
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                        <span>{meta.label}</span>
+                      </label>
+                      {meta.hint && <small className="label-field-hint">{meta.hint}</small>}
+                      {checked && (
+                        <span className="label-field-order">
+                          <button
+                            aria-label={`Move ${meta.label} up`}
+                            disabled={index === 0}
+                            onClick={() => setMovieLabelFieldsDraft((current) => moveLabelField(current, index, -1))}
+                            title="Move up"
+                            type="button"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            aria-label={`Move ${meta.label} down`}
+                            disabled={index === movieLabelFieldsDraft.length - 1}
+                            onClick={() => setMovieLabelFieldsDraft((current) => moveLabelField(current, index, 1))}
+                            title="Move down"
+                            type="button"
+                          >
+                            ↓
+                          </button>
+                          <em>{index + 1}</em>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="inline-actions">
+                <button
+                  className="ghost-button"
+                  onClick={() => setMovieLabelFieldsDraft([...DEFAULT_MOVIE_LABEL_FIELDS])}
+                  type="button"
+                >
+                  Reset to defaults
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() => setMovieLabelFieldsDraft([...MOVIE_LABEL_FIELDS.map((entry) => entry.field)])}
+                  type="button"
+                >
+                  Select all
+                </button>
+              </div>
+            </div>
             <div className="inline-actions">
               <button
                 className="primary-button"
@@ -685,10 +774,10 @@ export function SettingsPage({
               </button>
               <button
                 className="primary-button"
-                onClick={() => void handleSaveMovieLabelMode()}
+                onClick={() => void handleSaveMovieLabelFields()}
                 type="button"
               >
-                {movieLabelModeSaved ? "Saved!" : "Save movie labels"}
+                {movieLabelFieldsSaved ? "Saved!" : "Save movie labels"}
               </button>
               <button
                 className="primary-button"

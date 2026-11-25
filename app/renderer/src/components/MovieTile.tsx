@@ -1,5 +1,6 @@
 import { memo } from "react";
-import type { MovieLabelMode, MovieRecord } from "../../../shared/contracts";
+import type { MovieLabelField, MovieRecord } from "../../../shared/contracts";
+import { DEFAULT_MOVIE_LABEL_FIELDS, buildMovieLabel } from "../../../shared/movieLabels";
 import { PosterVisual } from "./PosterVisual";
 
 interface MovieTileProps {
@@ -13,7 +14,8 @@ interface MovieTileProps {
   /** Quick-play overlay button. When provided, a play icon appears on the poster. */
   onPlay?: () => void;
   separator?: "dash" | "dot";
-  labelMode?: MovieLabelMode;
+  /** Ordered metadata rows to print under the headline. Configured in Settings. */
+  labelFields?: MovieLabelField[];
 }
 
 function MovieTileComponent({
@@ -26,16 +28,12 @@ function MovieTileComponent({
   onToggleSelect,
   onPlay,
   separator = "dash",
-  labelMode = "display-name",
+  labelFields,
 }: MovieTileProps) {
-  const sep = separator === "dot" ? " · " : " - ";
-  const sourceFileName = movie.sourcePath.split(/[\\/]/).pop() ?? movie.sourcePath;
-  const fileName = sourceFileName.replace(/\.[^.]+$/, "") || sourceFileName;
-  const label = labelMode === "filename"
-    ? fileName
-    : labelMode === "title"
-      ? movie.title
-      : movie.displayName?.trim() || movie.title;
+  // Always resolve through the same default list the settings screen starts
+  // with, so a missing prop still renders the familiar ID/title/cast block.
+  const { primary, details } = buildMovieLabel(labelFields ?? DEFAULT_MOVIE_LABEL_FIELDS, movie);
+  const headline = primary ?? movie.title;
   return (
     <article
       className={[
@@ -85,11 +83,14 @@ function MovieTileComponent({
         )}
         <div className="poster-content">
           <span className="mode-pill" data-library-mode={movie.libraryMode}><span className={`mode-icon mode-icon-${movie.libraryMode}`} aria-hidden="true" />{movie.libraryMode === "gentle" ? "Gentle" : "Normal"}</span>
-          <strong>{label}</strong>
-          <small>
-            {movie.year ?? "Unknown year"}{sep}{movie.resolution}
-          </small>
-          {separator === "dash" && (
+          <strong>{headline}</strong>
+          {details.map((row) => (
+            <small className="tile-detail" key={row.field} title={row.value}>
+              <span className="tile-detail-label">{row.label}</span>
+              {row.value}
+            </small>
+          ))}
+          {separator === "dash" && labelFields?.includes("folder-path") && (
             <small className="muted-path">{movie.sourcePath}</small>
           )}
         </div>
@@ -99,6 +100,8 @@ function MovieTileComponent({
 }
 
 export const MovieTile = memo(MovieTileComponent, (prev, next) => {
+  const prevFields = prev.labelFields ?? DEFAULT_MOVIE_LABEL_FIELDS;
+  const nextFields = next.labelFields ?? DEFAULT_MOVIE_LABEL_FIELDS;
   return (
     prev.movie.id === next.movie.id &&
     prev.movie.title === next.movie.title &&
@@ -109,11 +112,16 @@ export const MovieTile = memo(MovieTileComponent, (prev, next) => {
     prev.movie.resolution === next.movie.resolution &&
     prev.movie.libraryMode === next.movie.libraryMode &&
     prev.movie.sourcePath === next.movie.sourcePath &&
+    prev.movie.videoId === next.movie.videoId &&
+    prev.movie.studio === next.movie.studio &&
+    prev.movie.series === next.movie.series &&
+    prev.movie.actresses.join("\u0000") === next.movie.actresses.join("\u0000") &&
+    prev.movie.keywords.join("\u0000") === next.movie.keywords.join("\u0000") &&
     prev.movie.subtitles.length === next.movie.subtitles.length &&
     prev.isActive === next.isActive &&
     prev.isSelected === next.isSelected &&
     prev.showCheckbox === next.showCheckbox &&
     prev.separator === next.separator &&
-    prev.labelMode === next.labelMode
+    prevFields.join(",") === nextFields.join(",")
   );
 });

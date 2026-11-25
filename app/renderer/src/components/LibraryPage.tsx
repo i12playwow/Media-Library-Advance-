@@ -2,7 +2,7 @@ import { LibraryModeSwitch } from "./LibraryModeSwitch";
 import { LibraryCounts } from "./LibraryCounts";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { LibraryMode, MovieLabelMode, MovieRecord } from "../../../shared/contracts";
+import type { LibraryMode, MovieLabelField, MovieRecord } from "../../../shared/contracts";
 import { distinctPosterMovies } from "../distinctPosterMovies";
 import { MovieTile } from "./MovieTile";
 
@@ -44,7 +44,7 @@ interface LibraryPageProps {
   loadMoreMovies: () => Promise<void>;
   PAGE_SIZE: number;
   onPlayMovie: (movie: MovieRecord) => void;
-  movieLabelMode: MovieLabelMode;
+  movieLabelFields: MovieLabelField[];
 }
 
 export function LibraryPage({
@@ -74,7 +74,7 @@ export function LibraryPage({
   loadMoreMovies,
   PAGE_SIZE,
   onPlayMovie,
-  movieLabelMode,
+  movieLabelFields,
 }: LibraryPageProps) {
   const [groupCopies, setGroupCopies] = useState(true);
   const posterMovies = distinctPosterMovies(sortedMovies.filter(movie => gentleUnlocked || movie.libraryMode !== "gentle"), groupCopies);
@@ -245,7 +245,7 @@ export function LibraryPage({
             <MovieTile
               key={movie.id}
               movie={movie}
-              labelMode={movieLabelMode}
+              labelFields={movieLabelFields}
               isActive={movie.id === selectedMovieId}
               isSelected={selectedIdSet.has(movie.id)}
               showCheckbox

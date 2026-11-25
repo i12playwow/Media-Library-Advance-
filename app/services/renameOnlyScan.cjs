@@ -30,7 +30,8 @@ async function renameScanCandidate(database, candidate, { organizationSettings, 
     year: nfo.year ?? candidate.parsed.year, videoId: nfo.videoId || candidate.parsed.videoId,
     sourcePath: source, folderPath: folder, libraryMode: candidate.mode,
     resolution: candidate.parsed.resolution, posterUrl: null, posterSource: 'none',
-    actresses: nfo.actresses || [], keywords: candidate.parsed.keywords
+    actresses: nfo.actresses || [], keywords: candidate.parsed.keywords,
+    studio: nfo.studio || null, series: nfo.series || null
   };
   const target = buildTargetVideoPath(folder, { ...movie, modelName: nfo.studio, organizationSettings, resolveLongPath }, ext);
   if (path.dirname(target) !== folder) throw new Error('The new filename must stay in the original folder.');

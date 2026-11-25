@@ -539,7 +539,7 @@ describe("MovieTile", () => {
     expect(screen.getByText("Great Film")).toBeInTheDocument();
   });
 
-  it("uses a custom display name by default", () => {
+  it("uses the metadata title as the headline and lists the default fields", () => {
     render(
       <MovieTile
         movie={makeMovie({ displayName: "My Label", title: "Metadata Title" })}
@@ -548,34 +548,97 @@ describe("MovieTile", () => {
         onContextMenu={() => {}}
       />
     );
-    expect(screen.getByText("My Label")).toBeInTheDocument();
+    // Title is the headline; the display name is not part of the default set.
+    expect(screen.getByText("Metadata Title")).toBeInTheDocument();
+    expect(screen.queryByText("My Label")).toBeNull();
+    // DVD ID, year and resolution come from DEFAULT_MOVIE_LABEL_FIELDS.
+    expect(screen.getByText("TEST-001")).toBeInTheDocument();
+    expect(screen.getByText("2023")).toBeInTheDocument();
+    expect(screen.getByText("1080p")).toBeInTheDocument();
   });
 
-  it("can use the metadata title instead of the display name", () => {
+  it("shows only the fields the operator ticked", () => {
     render(
       <MovieTile
-        movie={makeMovie({ displayName: "My Label", title: "Metadata Title" })}
-        labelMode="title"
+        movie={makeMovie({
+          title: "Metadata Title",
+          videoId: "SSIS-123",
+          actresses: ["Yua Mikami"],
+          keywords: ["solo", "hd"],
+          studio: "S1 No.1 Style"
+        })}
+        labelFields={["title", "dvd-id", "actresses", "studio"]}
         isActive={false}
         onClick={() => {}}
         onContextMenu={() => {}}
       />
     );
     expect(screen.getByText("Metadata Title")).toBeInTheDocument();
-    expect(screen.queryByText("My Label")).toBeNull();
+    expect(screen.getByText("SSIS-123")).toBeInTheDocument();
+    expect(screen.getByText("Yua Mikami")).toBeInTheDocument();
+    expect(screen.getByText("S1 No.1 Style")).toBeInTheDocument();
+    // Tag and year were not ticked, so they must not leak into the card.
+    expect(screen.queryByText("solo, hd")).toBeNull();
+    expect(screen.queryByText("2023")).toBeNull();
   });
 
-  it("can use the source filename without its extension", () => {
+  it("uses the display name as the headline when it is listed first", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({ displayName: "My Label", title: "Metadata Title" })}
+        labelFields={["display-name", "title"]}
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    const headline = screen.getByText("My Label");
+    expect(headline.tagName).toBe("STRONG");
+    // Title then falls through to a metadata row instead of disappearing.
+    expect(screen.getByText("Metadata Title")).toBeInTheDocument();
+  });
+
+  it("falls back to the derived DVD ID from the file name", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({
+          title: "Some Release",
+          videoId: null,
+          sourcePath: "C:\\Movies\\ABP-999 - Some Release.mp4"
+        })}
+        labelFields={["title", "dvd-id"]}
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    expect(screen.getByText("ABP-999")).toBeInTheDocument();
+  });
+
+  it("shows the source filename when that field is ticked", () => {
     render(
       <MovieTile
         movie={makeMovie({ sourcePath: "C:\\Movies\\custom-file-name.mp4" })}
-        labelMode="filename"
+        labelFields={["title", "filename"]}
         isActive={false}
         onClick={() => {}}
         onContextMenu={() => {}}
       />
     );
     expect(screen.getByText("custom-file-name")).toBeInTheDocument();
+  });
+
+  it("always keeps the title when a saved field list is empty", () => {
+    render(
+      <MovieTile
+        movie={makeMovie({ title: "Never Blank" })}
+        labelFields={[]}
+        isActive={false}
+        onClick={() => {}}
+        onContextMenu={() => {}}
+      />
+    );
+    expect(screen.getByText("Never Blank")).toBeInTheDocument();
   });
 
   it("shows resolution in the tile", () => {

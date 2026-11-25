@@ -984,6 +984,100 @@ code {
   word-break: break-word;
 }
 
+/* One metadata row per ticked label field (Settings → Movie tile labels). The
+   label is a fixed-width chip so the values line up down the card. */
+.tile-detail {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.tile-detail-label {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.32rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+/* Checkbox list in Settings: one row per available field. */
+.label-field-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.label-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.label-field.checked {
+  border-color: rgba(255, 122, 61, 0.35);
+  background: rgba(255, 122, 61, 0.07);
+}
+
+.label-field > .toggle-field {
+  grid-column: 1;
+}
+
+.label-field-hint {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+  opacity: 0.78;
+}
+
+.label-field-order {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.label-field-order button {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.label-field-order button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.label-field-order em {
+  min-width: 1rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  text-align: right;
+}
+
 .detail-panel {
   border-radius: 24px;
   padding: 1.25rem;
