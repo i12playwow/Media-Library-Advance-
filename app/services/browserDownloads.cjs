@@ -8,11 +8,23 @@ function decode(value) {
   try { return decodeURIComponent(value); } catch { return value; }
 }
 
-function filenameFor(response, url) {
+function mediaKind(response, url) {
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  let pathname = '';
+  try { pathname = new URL(url).pathname.toLowerCase(); } catch { /* invalid URLs are rejected before download */ }
+  if (contentType === 'application/vnd.apple.mpegurl' || contentType === 'application/x-mpegurl' || contentType === 'audio/mpegurl' || /\.m3u8$/i.test(pathname)) return 'hls-manifest';
+  if (contentType === 'application/dash+xml' || /\.mpd$/i.test(pathname)) return 'dash-manifest';
+  return 'file';
+}
+
+function filenameFor(response, url, kind = 'file') {
   const disposition = response.headers.get('content-disposition') || '';
   const encoded = disposition.match(/(?:^|;)\s*filename\*=UTF-8'[^']*'([^;]+)/i)?.[1];
   const plain = disposition.match(/(?:^|;)\s*filename=(?:"([^"]*)"|([^;]+))/i);
-  const raw = (encoded ? decode(encoded) : plain?.[1] || plain?.[2]) || decode(path.posix.basename(new URL(url).pathname)) || 'download';
+  const fallback = decode(path.posix.basename(new URL(url).pathname)) || 'download';
+  let raw = (encoded ? decode(encoded) : plain?.[1] || plain?.[2]) || fallback;
+  if (kind === 'hls-manifest' && !/\.m3u8$/i.test(raw)) raw += '.m3u8';
+  if (kind === 'dash-manifest' && !/\.mpd$/i.test(raw)) raw += '.mpd';
   let name = raw.replace(/[<>:"/\\|?*\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, '_').trim().replace(/[. ]+$/, '');
   if (!name) name = 'download';
   if (/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name)) name = '_' + name;
@@ -120,12 +132,14 @@ function createDownloadQueue({ fetchFile, publish, verify, shell }) {
         return 'rate-limit';
       }
       if (!response.ok || !response.body) throw new Error(`Download failed (HTTP ${response.status}).`);
+      const kind = mediaKind(response, response.url || entry.url);
+      entry.kind = kind;
       const disposition = response.headers.get('content-disposition') || '';
       if (/^text\/html\b/i.test(response.headers.get('content-type') || '') && !/^attachment\b/i.test(disposition)) {
         throw new Error('This link opened a web page. Use a direct file link.');
       }
       signal.throwIfAborted();
-      reserved = await reserveFile(folder, filenameFor(response, response.url || entry.url));
+      reserved = await reserveFile(folder, filenameFor(response, response.url || entry.url, kind));
       entry.name = reserved.name;
       entry.file = reserved.target;
       entry.total = Number(response.headers.get('content-length')) || 0;
@@ -331,4 +345,4 @@ function shell() {
   return require('electron').shell;
 }
 
-module.exports = { createDownloadQueue };
+module.exports = { createDownloadQueue, filenameFor, mediaKind };

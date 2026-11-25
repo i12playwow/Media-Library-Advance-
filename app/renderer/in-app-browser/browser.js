@@ -146,7 +146,7 @@ async function scanVideos() {
     const results = await toolbar.command('findVideos');
     if (revision !== videoRevision) return;
     videoStatus.textContent = results.length
-      ? `${results.length} video source${results.length === 1 ? '' : 's'} found. Select the ones to save offline.`
+      ? `${results.length} media source${results.length === 1 ? '' : 's'} found. Direct files download as-is; playlists are saved without their segments.`
       : 'No video sources found on this page. Play the video once, then scan again.';
     for (const result of results) {
       const label = document.createElement('label');
@@ -154,7 +154,8 @@ async function scanVideos() {
       checkbox.type = 'checkbox';
       checkbox.value = result.url;
       label.title = result.url;
-      label.append(checkbox, result.label);
+      if (result.kind === 'manifest') label.dataset.kind = 'manifest';
+      label.append(checkbox, result.kind === 'manifest' ? `${result.label} (playlist; may not be a direct file)` : result.label);
       videoChoices.append(label);
     }
     videoPicker.hidden = !results.length;
@@ -486,7 +487,7 @@ function managerRow(entry) {
   info.className = 'download-info';
   const name = document.createElement('span');
   name.className = 'download-name';
-  name.textContent = entry.name || entry.url;
+  name.textContent = `${entry.name || entry.url}${entry.kind === 'hls-manifest' ? ' · HLS playlist' : entry.kind === 'dash-manifest' ? ' · DASH manifest' : ''}`;
   name.title = entry.url;
   const meta = document.createElement('span');
   meta.className = 'download-meta';

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { createDownloadQueue } = require('../app/services/browserDownloads.cjs');
+const { createDownloadQueue, filenameFor, mediaKind } = require('../app/services/browserDownloads.cjs');
 const { Readable } = require('node:stream');
 
 function deferred() {
@@ -29,6 +29,15 @@ function fakeResponse(body, { total, status = 200, headers = {} } = {}) {
     url: 'https://example.com/file.bin'
   };
 }
+
+test('classifies HLS/DASH manifests from URL or MIME type and names playlist files', () => {
+  const response = { headers: { get: key => key === 'content-type' ? 'application/vnd.apple.mpegurl; charset=utf-8' : null } };
+  assert.equal(mediaKind(response, 'https://cdn.example/watch?id=42'), 'hls-manifest');
+  assert.equal(filenameFor(response, 'https://cdn.example/watch?id=42', 'hls-manifest'), 'watch.m3u8');
+  assert.equal(mediaKind({ headers: { get: key => key === 'content-type' ? 'application/dash+xml' : null } }, 'https://cdn.example/manifest?token=1'), 'dash-manifest');
+  assert.equal(filenameFor({ headers: { get: () => 'attachment; filename="stream.txt"' } }, 'https://cdn.example/manifest', 'dash-manifest'), 'stream.txt.mpd');
+  assert.equal(mediaKind({ headers: { get: () => 'video/mp4' } }, 'https://cdn.example/clip.m3u8?token=1'), 'hls-manifest');
+});
 
 test('downloads complete with per-entry metadata (name, file path, totals)', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mla-dl-'));
@@ -55,6 +64,32 @@ test('downloads complete with per-entry metadata (name, file path, totals)', asy
   assert.ok(entry.file.startsWith(dir));
   const saved = await fs.readFile(path.join(dir, 'file.bin'), 'utf8');
   assert.equal(saved, 'hello download world');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('authenticated fetch receives the supplied abort signal and stores HLS as a playlist', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mla-dl-'));
+  let receivedSignal;
+  const queue = createDownloadQueue({
+    fetchFile: async (_url, signal) => {
+      receivedSignal = signal;
+      return { ...fakeResponse(Buffer.from('#EXTM3U\\n#EXT-X-ENDLIST\\n'), { total: 24, headers: { 'content-type': 'application/vnd.apple.mpegurl' } }), url: 'https://example.com/watch?id=9' };
+    },
+    publish: () => {},
+    verify: () => {}
+  });
+  queue.start(['https://example.com/watch?id=9'], dir);
+  await new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (queue.state().entries[0]?.status === 'completed') { clearInterval(timer); resolve(); }
+    }, 25);
+    setTimeout(() => reject(new Error('timeout')), 5000);
+  });
+  const entry = queue.state().entries[0];
+  assert.equal(entry.kind, 'hls-manifest');
+  assert.equal(entry.name, 'watch.m3u8');
+  assert.ok(receivedSignal instanceof AbortSignal);
+  assert.equal(await fs.readFile(entry.file, 'utf8'), '#EXTM3U\\n#EXT-X-ENDLIST\\n');
   await fs.rm(dir, { recursive: true, force: true });
 });
 

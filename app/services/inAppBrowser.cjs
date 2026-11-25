@@ -4,6 +4,7 @@ const { createDownloadQueue } = require('./browserDownloads.cjs');
 const { createShields, upgradeConnection } = require('./adBlocker.cjs');
 const { createBrowserSettings } = require('./browserSettings.cjs');
 const { createBrowserLibrary } = require('./browserLibrary.cjs');
+const { discoverPageMedia, validateMediaResults } = require('./browserMediaDetection.cjs');
 
 const TOOLBAR_HEIGHT = 70;
 const TABBAR_HEIGHT = 34;
@@ -39,33 +40,6 @@ function looksLikeSearch(value) {
   if (bare === 'localhost') return false;
   if (/^[\d.]+(?::\d+)?$/.test(bare)) return false;
   return !bare.includes('.');
-}
-
-function mediaCollector() {
-  // Runs in the page's isolated world: collects playable video/audio
-  // sources (src + blob-relative network sources we can re-request).
-  const results = new Map();
-  const limit = (url) => {
-    if (results.size >= 50) return true;
-    let parsed;
-    try { parsed = new URL(url); } catch { return true; }
-    if (!['http:', 'https:', 'blob:'].includes(parsed.protocol)) return true;
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      if (parsed.username || parsed.password) return true;
-      if (parsed.href.length > 8192) return true;
-    }
-    parsed.hash = '';
-    const key = parsed.href;
-    if (!results.has(key)) results.set(key, key);
-    return false;
-  };
-  for (const video of document.querySelectorAll('video')) {
-    if (video.src) limit(video.src);
-    for (const source of video.querySelectorAll('source')) if (source.src) limit(source.src);
-  }
-  for (const audio of document.querySelectorAll('audio')) if (audio.src) limit(audio.src);
-  for (const source of document.querySelectorAll('source')) if (source.src) limit(source.src);
-  return [...results.values()];
 }
 
 function videoLinks() {
@@ -716,17 +690,10 @@ ${body}
         const owner = page;
         const url = owner.getURL();
         if (!/^https?:\/\//i.test(url) || owner.isLoadingMainFrame()) throw new Error('Open a website and wait for it to load first.');
-        const collected = await owner.executeJavaScriptInIsolatedWorld(1002, [{ code: `(${mediaCollector.toString()})()` }]);
+        const collected = await owner.executeJavaScriptInIsolatedWorld(1002, [{ code: `(${discoverPageMedia.toString()})()` }]);
         const anchors = await owner.executeJavaScriptInIsolatedWorld(1003, [{ code: `(${videoLinks.toString()})()` }]);
         if (page !== owner || owner.isDestroyed() || owner.getURL() !== url) throw new Error('The page changed. Try finding videos again.');
-        const seen = new Set();
-        const combined = [];
-        for (const item of [...collected.map(src => ({ url: src, label: src.slice(0, 160) })), ...anchors]) {
-          if (seen.has(item.url)) continue;
-          seen.add(item.url);
-          combined.push(item);
-        }
-        return combined;
+        return validateMediaResults([...collected, ...anchors]);
       }
       case 'startDownloads':
         if (!choosingFolder && !downloads.state().running && !downloads.state().paused) {
